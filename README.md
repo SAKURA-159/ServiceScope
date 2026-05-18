@@ -1,185 +1,191 @@
 # ServiceScope
 
-High-concurrency C++ service with real-time monitoring dashboard, fault injection, and AI-powered log analysis.
+高并发 C++ 服务 + 实时监控面板 + 故障注入 + AI 日志分析
 
-## What is this?
+## 项目简介
 
-A self-contained observability demo that shows the full链路 of a production service:
+一个完整的服务可观测性演示项目，展示从指标采集到 AI 分析的完整链路：
 
 ```
-Metrics Collection → Live Dashboard → Fault Injection → Anomaly Detection → AI Analysis
+指标采集 → 实时看板 → 故障注入 → 异常检测 → AI 分析
 ```
 
-- **C++ HTTP server** with thread-pool concurrency
-- **Web Dashboard** with real-time charts (QPS, latency, errors, connections)
-- **Fault injection** — inject latency, errors, or connection drops at runtime
-- **AI log analysis** — auto-detects 6 types of anomalies and generates reports
+- **C++ HTTP 服务**，基于线程池的高并发架构
+- **Web 看板**，Chart.js 实时图表（QPS、延迟、错误率、连接数）
+- **故障注入**，运行时注入延迟、错误、连接中断，无需重启
+- **AI 分析**，接入大模型（DeepSeek / 通义千问 / Ollama 等），用自然语言解读系统状态
 
-## Quick Start
+## 快速开始
 
-### Prerequisites
+### 环境要求
 
 - CMake 3.16+
-- C++17 compiler (MSVC, GCC, or Clang)
+- C++17 编译器（MSVC、GCC 或 Clang）
 - Git
 
-### Build
+### 编译
 
 ```bash
 # Linux / macOS
 ./build.sh
 
-# Windows (MinGW)
+# Windows（MinGW）
 build.bat mingw
 
-# Windows (MSVC)
+# Windows（MSVC）
 build.bat
 ```
 
-### Run
+### 运行
 
 ```bash
-./build/servicescope              # default: port 8080, 8 threads
-./build/servicescope 3000 16      # custom port and thread count
+./build/servicescope              # 默认：端口 8080，8 线程
+./build/servicescope 3000 16      # 自定义端口和线程数
 ```
 
-Then open **http://localhost:8080** in your browser.
+然后浏览器打开 **http://localhost:8080**。
 
-## Dashboard
+## 监控面板
 
-The dashboard refreshes every second and shows:
+面板每秒刷新一次，包含以下模块：
 
-| Panel | Description |
+| 模块 | 说明 |
 |---|---|
-| **QPS** | Requests per second (1s / 5s / 60s windows) |
-| **Latency** | P50 / P90 / P99 / P999 percentiles |
-| **Error Rate** | Percentage of failed requests |
-| **Active Connections** | Current open connections |
-| **QPS Chart** | 60-second QPS trend line |
-| **Latency Histogram** | Distribution across 16 exponential buckets (1ms–32s) |
-| **Percentile Trends** | P50 / P90 / P99 over time |
-| **Slow Requests** | Requests exceeding 200ms |
-| **Anomalies** | Auto-detected issues with severity labels |
-| **AI Analysis** | Markdown report with recommendations |
+| **QPS** | 每秒请求数（1s / 5s / 60s 窗口） |
+| **延迟** | P50 / P90 / P99 / P999 分位数 |
+| **错误率** | 失败请求占比 |
+| **活跃连接数** | 当前打开的连接 |
+| **QPS 趋势图** | 60 秒 QPS 折线图 |
+| **延迟直方图** | 16 个指数级桶（1ms–32s）的分布 |
+| **分位数趋势** | P50 / P90 / P99 随时间变化 |
+| **慢请求** | 超过 200ms 的请求列表 |
+| **异常检测** | 自动识别的问题，带严重程度标签 |
+| **AI 分析** | 大模型生成的诊断报告 |
 
-## API Endpoints
+## API 接口
 
-| Method | Path | Description |
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| `GET` | `/` | Dashboard HTML |
-| `GET` | `/metrics` | Full metrics JSON |
-| `GET` | `/api/health` | Health check |
-| `GET` | `/api/work?delay=N` | Simulate work with N ms delay |
-| `GET` | `/api/random` | Random 0–200ms delay |
-| `GET` | `/api/data?count=N` | Return N synthetic records |
-| `GET` | `/api/fault/config` | Get current fault injection config |
-| `POST` | `/api/fault/config` | Update fault injection config |
-| `GET` | `/api/logs` | Recent log entries |
-| `GET` | `/api/logs/analysis` | AI-generated analysis report |
-| `GET` | `/api/logs/anomalies` | Detected anomalies list |
-| `POST` | `/api/reset` | Reset all metrics |
+| `GET` | `/` | 监控面板 HTML |
+| `GET` | `/metrics` | 完整指标 JSON |
+| `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/work?delay=N` | 模拟耗时 N 毫秒的请求 |
+| `GET` | `/api/random` | 随机 0–200ms 延迟 |
+| `GET` | `/api/data?count=N` | 返回 N 条模拟数据 |
+| `GET` | `/api/fault/config` | 查看当前故障注入配置 |
+| `POST` | `/api/fault/config` | 修改故障注入配置 |
+| `GET` | `/api/logs` | 最近日志 |
+| `GET` | `/api/logs/analysis` | 规则引擎分析报告 |
+| `GET` | `/api/logs/anomalies` | 检测到的异常列表 |
+| `POST` | `/api/reset` | 重置所有指标 |
 
-## Fault Injection
+## 故障注入
 
-Configure at runtime without restart:
+运行时动态配置，无需重启服务：
 
 ```bash
-# Inject 2-second delay
+# 注入 2 秒延迟
 curl -X POST localhost:8080/api/fault/config \
   -H "Content-Type: application/json" \
   -d '{"enabled":true, "delay_ms":2000}'
 
-# Inject 50% error rate
+# 注入 50% 错误率
 curl -X POST localhost:8080/api/fault/config \
   -H "Content-Type: application/json" \
   -d '{"enabled":true, "error_rate":0.5}'
 
-# Disable all faults
+# 关闭所有故障
 curl -X POST localhost:8080/api/fault/config \
   -H "Content-Type: application/json" \
   -d '{"enabled":false}'
 ```
 
-Available fault parameters:
+可用参数：
 
-| Parameter | Type | Description |
+| 参数 | 类型 | 说明 |
 |---|---|---|
-| `enabled` | bool | Master switch |
-| `delay_ms` | int | Base latency to inject |
-| `delay_jitter_ms` | int | Random jitter (±ms) |
-| `error_rate` | float | Probability of error (0.0–1.0) |
-| `error_http_code` | int | HTTP code for injected errors |
-| `drop_rate` | float | Probability of connection drop (0.0–1.0) |
-| `pause` | bool | Return 503 for all requests |
+| `enabled` | bool | 总开关 |
+| `delay_ms` | int | 注入的基础延迟 |
+| `delay_jitter_ms` | int | 随机抖动（±ms） |
+| `error_rate` | float | 错误概率（0.0–1.0） |
+| `error_http_code` | int | 注入错误的 HTTP 状态码 |
+| `drop_rate` | float | 连接中断概率（0.0–1.0） |
+| `pause` | bool | 所有请求返回 503 |
 
-## Stress Testing
+## 压力测试
 
 ```bash
-# 100 concurrent workers for 30 seconds, mixed workload
+# 100 并发，持续 30 秒，混合负载
 python stress_test.py --concurrency 100 --duration 30
 
-# Slow-request workload
+# 慢请求负载
 python stress_test.py --mode slow --concurrency 20 --duration 10
 
-# Data-heavy workload
+# 数据查询负载
 python stress_test.py --mode data --concurrency 50 --duration 20
 ```
 
-## AI Analysis
+## 内建异常检测
 
-The log analyzer watches metrics and logs in real-time, detecting:
+规则引擎实时监控指标和日志，检测 6 类异常：
 
-| Anomaly Type | Trigger |
+| 异常类型 | 触发条件 |
 |---|---|
-| `qps_spike` | QPS exceeds 3× baseline |
-| `error_spike` | Error rate exceeds 5× baseline or >10% |
-| `latency_spike` | Avg latency exceeds 3× baseline or P99 > 500ms |
-| `connection_flood` | Active connections > 200 |
-| `slow_request_surge` | Slow request queue > 50 entries |
-| `error_flood` | >50 ERROR logs in 60 seconds |
+| `qps_spike` | QPS 超过基线 3 倍 |
+| `error_spike` | 错误率超过基线 5 倍，或 >10% |
+| `latency_spike` | 平均延迟超过基线 3 倍，或 P99 > 500ms |
+| `connection_flood` | 活跃连接 > 200 |
+| `slow_request_surge` | 慢请求队列 > 50 条 |
+| `error_flood` | 60 秒内 >50 条 ERROR 日志 |
 
-Each anomaly includes a severity level (`critical`, `high`, `medium`) and confidence score.
+每个异常包含严重等级（`critical` / `high` / `medium`）和置信度评分。
 
-## Project Structure
+## 项目结构
 
 ```
 ServiceScope/
-├── CMakeLists.txt          # CMake build (auto-fetches dependencies)
-├── build.bat / build.sh    # Build scripts
-├── run.bat                 # Windows launcher
-├── stress_test.py          # Load generator
+├── CMakeLists.txt          # CMake 构建（自动拉取依赖）
+├── build.bat / build.sh    # 编译脚本
+├── run.bat                 # Windows 启动脚本
+├── stress_test.py          # 压力测试工具
+├── ai_bridge.py            # Python AI 桥接（处理 HTTPS 请求）
 ├── src/
-│   ├── main.cpp            # HTTP server + embedded Dashboard HTML
-│   ├── metrics.h           # Atomic lock-free metrics collector
-│   ├── fault_injector.h    # Runtime fault injection engine
-│   ├── log_analyzer.h      # Heuristic anomaly detection + report generator
-│   └── ai_client.h         # LLM client (OpenAI / Claude / Ollama)
-└── .gitignore
+│   ├── main.cpp            # HTTP 服务 + 内嵌看板 HTML
+│   ├── metrics.h           # 原子化无锁指标采集
+│   ├── fault_injector.h    # 运行时故障注入引擎
+│   ├── log_analyzer.h      # 规则引擎异常检测 + 报告生成
+│   └── ai_client.h         # 大模型客户端（OpenAI / Claude / Ollama）
+├── .gitignore
+└── README.md
 ```
 
-## AI Model Integration
+## 大模型接入
 
-ServiceScope can call a real LLM to analyze your service metrics. All OpenAI-compatible APIs are supported, including DeepSeek, Tongyi Qianwen, Ollama, and more.
+ServiceScope 可以调用真正的大模型来分析系统指标，支持所有 OpenAI 兼容接口（DeepSeek、通义千问、Ollama 等）。
 
-### Quick Setup
+### 快速配置
 
-**Option 1: DeepSeek (cheap, fast, Chinese-friendly)**
+**方式一：DeepSeek（推荐，便宜好用，中文友好）**
+
 ```bash
 # Windows
 set AI_ENDPOINT=https://api.deepseek.com/v1/chat/completions
-set AI_API_KEY=sk-your-deepseek-key
+set AI_API_KEY=sk-你的deepseek密钥
 set AI_MODEL=deepseek-chat
 
 # Linux / macOS
 export AI_ENDPOINT="https://api.deepseek.com/v1/chat/completions"
-export AI_API_KEY="sk-your-deepseek-key"
+export AI_API_KEY="sk-你的deepseek密钥"
 export AI_MODEL="deepseek-chat"
 ./build/servicescope
 ```
 
-**Option 2: Ollama (local, free, no internet)**
+先在 https://platform.deepseek.com 注册获取 API Key。
+
+**方式二：Ollama（本地运行，免费，无需联网）**
+
 ```bash
-# Install Ollama: https://ollama.com
+# 安装 Ollama：https://ollama.com
 ollama pull llama3.2
 
 export AI_ENDPOINT="http://localhost:11434/v1/chat/completions"
@@ -188,76 +194,80 @@ export AI_MODEL="llama3.2"
 ./build/servicescope
 ```
 
-**Option 3: Tongyi Qianwen (Alibaba Cloud)**
+**方式三：通义千问（阿里云）**
+
 ```bash
 export AI_ENDPOINT="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-export AI_API_KEY="sk-your-dashscope-key"
+export AI_API_KEY="sk-你的dashscope密钥"
 export AI_MODEL="qwen-plus"
 ./build/servicescope
 ```
 
-**Option 4: OpenAI**
+**方式四：OpenAI**
+
 ```bash
 export AI_ENDPOINT="https://api.openai.com/v1/chat/completions"
-export AI_API_KEY="sk-your-key"
+export AI_API_KEY="sk-你的密钥"
 export AI_MODEL="gpt-4o-mini"
 ./build/servicescope
 ```
 
-**Option 5: Claude (Anthropic)**
+**方式五：Claude（Anthropic）**
+
 ```bash
 export AI_ENDPOINT="https://api.anthropic.com/v1/messages"
-export AI_API_KEY="sk-ant-your-key"
+export AI_API_KEY="sk-ant-你的密钥"
 export AI_MODEL="claude-haiku-4-5"
 ./build/servicescope
 ```
 
-Or configure at runtime:
+也可以运行时配置：
+
 ```bash
 curl -X POST localhost:8080/api/ai/config \
   -H "Content-Type: application/json" \
   -d '{"endpoint":"https://api.deepseek.com/v1/chat/completions","api_key":"sk-xxx","model":"deepseek-chat"}'
 ```
 
-### Supported Providers
+### 支持的模型供应商
 
-Any OpenAI-compatible API works. Tested providers:
+只要兼容 OpenAI 接口格式就能用：
 
-| Provider | Endpoint | Model Examples |
+| 供应商 | 接口地址 | 模型示例 |
 |---|---|---|
-| **DeepSeek** | `https://api.deepseek.com/v1/chat/completions` | `deepseek-chat`, `deepseek-reasoner` |
-| **Ollama** (local) | `http://localhost:11434/v1/chat/completions` | `llama3.2`, `qwen2.5`, `deepseek-r1` |
-| **通义千问** | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` | `qwen-plus`, `qwen-max` |
-| **OpenAI** | `https://api.openai.com/v1/chat/completions` | `gpt-4o-mini`, `gpt-4o` |
-| **Claude** | `https://api.anthropic.com/v1/messages` | `claude-haiku-4-5`, `claude-sonnet-4-6` |
-| **vLLM** (self-hosted) | `http://your-host:8000/v1/chat/completions` | any |
-| 任意兼容接口 | `your-endpoint/v1/chat/completions` | any |
+| **DeepSeek** | `https://api.deepseek.com/v1/chat/completions` | `deepseek-chat`、`deepseek-reasoner` |
+| **Ollama**（本地） | `http://localhost:11434/v1/chat/completions` | `llama3.2`、`qwen2.5`、`deepseek-r1` |
+| **通义千问** | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` | `qwen-plus`、`qwen-max` |
+| **OpenAI** | `https://api.openai.com/v1/chat/completions` | `gpt-4o-mini`、`gpt-4o` |
+| **Claude** | `https://api.anthropic.com/v1/messages` | `claude-haiku-4-5`、`claude-sonnet-4-6` |
+| **vLLM**（自部署） | `http://你的服务器:8000/v1/chat/completions` | 任意 |
+| 任意兼容接口 | `你的地址/v1/chat/completions` | 任意 |
 
-### AI Endpoints
+### AI 相关接口
 
-| Method | Path | Description |
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| `POST` | `/api/ai/analyze` | Call AI to analyze current metrics |
-| `GET` | `/api/ai/config` | Check AI configuration |
-| `POST` | `/api/ai/config` | Update AI configuration at runtime |
-| `GET` | `/api/ai/test` | Test AI API connectivity |
+| `POST` | `/api/ai/analyze` | 调用 AI 分析当前指标 |
+| `GET` | `/api/ai/config` | 查看 AI 配置 |
+| `POST` | `/api/ai/config` | 运行时修改 AI 配置 |
+| `GET` | `/api/ai/test` | 测试 AI 连接 |
 
-### How it works
+### 工作原理
 
-1. The server collects current metrics, recent anomalies, and log entries
-2. Builds a structured prompt with all context
-3. Sends to the configured LLM via OpenAI-compatible protocol
-4. Returns the AI's analysis: health assessment, root cause, recommended actions
+1. 服务收集当前指标、最近异常、日志条目
+2. 构建包含全部上下文的结构化提示词
+3. 通过 OpenAI 兼容协议发送给大模型
+4. 返回 AI 的分析结果：健康评估、根因分析、操作建议
 
-If no AI is configured, `/api/ai/analyze` gracefully falls back to the built-in heuristic analyzer.
+未配置 AI 时，`/api/ai/analyze` 会优雅降级到内建规则引擎，不会报错。
 
-## Dependencies
+## 依赖
 
-- [cpp-httplib](https://github.com/yhirose/cpp-httplib) — header-only HTTP server + client
-- [nlohmann/json](https://github.com/nlohmann/json) — header-only JSON library
-- [Chart.js](https://www.chartjs.org/) — dashboard charts (CDN)
+- [cpp-httplib](https://github.com/yhirose/cpp-httplib) — 单头文件 HTTP 服务端 + 客户端
+- [nlohmann/json](https://github.com/nlohmann/json) — 单头文件 JSON 库
+- [Chart.js](https://www.chartjs.org/) — 看板图表（CDN 加载）
 
-All C++ dependencies are fetched automatically by CMake. No manual installation needed.
+所有 C++ 依赖由 CMake 自动拉取，无需手动安装。
 
 ## License
 
