@@ -152,13 +152,73 @@ ServiceScope/
 │   ├── main.cpp            # HTTP server + embedded Dashboard HTML
 │   ├── metrics.h           # Atomic lock-free metrics collector
 │   ├── fault_injector.h    # Runtime fault injection engine
-│   └── log_analyzer.h      # AI anomaly detection + report generator
+│   ├── log_analyzer.h      # Heuristic anomaly detection + report generator
+│   └── ai_client.h         # LLM client (OpenAI / Claude / Ollama)
 └── .gitignore
 ```
 
+## AI Model Integration
+
+ServiceScope can call a real LLM (not just heuristic rules) to analyze your service metrics. It supports any OpenAI-compatible API.
+
+### Quick Setup
+
+**Option 1: Local Ollama (free, no network needed)**
+```bash
+# Install Ollama: https://ollama.com
+ollama pull llama3.2
+
+# Start ServiceScope with AI
+export AI_ENDPOINT="http://localhost:11434/v1/chat/completions"
+export AI_API_KEY="ollama"
+export AI_MODEL="llama3.2"
+./build/servicescope
+```
+
+**Option 2: OpenAI API**
+```bash
+export AI_ENDPOINT="https://api.openai.com/v1/chat/completions"
+export AI_API_KEY="sk-your-key-here"
+export AI_MODEL="gpt-4o-mini"
+./build/servicescope
+```
+
+**Option 3: Claude API (Anthropic)**
+```bash
+export AI_ENDPOINT="https://api.anthropic.com/v1/messages"
+export AI_API_KEY="sk-ant-your-key-here"
+export AI_MODEL="claude-haiku-4-5"
+./build/servicescope
+```
+
+Or configure at runtime:
+```bash
+curl -X POST localhost:8080/api/ai/config \
+  -H "Content-Type: application/json" \
+  -d '{"endpoint":"http://localhost:11434/v1/chat/completions","api_key":"ollama","model":"llama3.2"}'
+```
+
+### AI Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/ai/analyze` | Call AI to analyze current metrics |
+| `GET` | `/api/ai/config` | Check AI configuration |
+| `POST` | `/api/ai/config` | Update AI configuration at runtime |
+| `GET` | `/api/ai/test` | Test AI API connectivity |
+
+### How it works
+
+1. The server collects current metrics, recent anomalies, and log entries
+2. Builds a structured prompt with all context
+3. Sends to the configured LLM
+4. Returns the AI's analysis: health assessment, root cause, recommended actions
+
+If no AI is configured, `/api/ai/analyze` gracefully falls back to the built-in heuristic analyzer.
+
 ## Dependencies
 
-- [cpp-httplib](https://github.com/yhirose/cpp-httplib) — header-only HTTP server
+- [cpp-httplib](https://github.com/yhirose/cpp-httplib) — header-only HTTP server + client
 - [nlohmann/json](https://github.com/nlohmann/json) — header-only JSON library
 - [Chart.js](https://www.chartjs.org/) — dashboard charts (CDN)
 

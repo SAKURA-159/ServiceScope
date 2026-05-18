@@ -9,6 +9,7 @@
 #include "metrics.h"
 #include "fault_injector.h"
 #include "log_analyzer.h"
+#include "ai_client.h"
 
 using json = nlohmann::json;
 using namespace servicescope;
@@ -274,8 +275,15 @@ canvas{width:100%!important}
 <div class="grid">
   <div class="card full-width">
     <h2>AI Log Analysis</h2>
-    <button onclick="fetchAI()" style="margin-bottom:8px">Run Analysis</button>
-    <div id="ai-summary">Click "Run Analysis" to generate AI log analysis</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+      <button onclick="fetchAI()">Heuristic Analysis</button>
+      <button onclick="fetchAIReal()" style="background:var(--purple)">AI Model Analysis</button>
+      <button onclick="fetchAIConfig()" style="background:transparent;border:1px solid var(--border);font-size:11px">Check Config</button>
+      <span id="ai-status" style="font-size:12px;color:#8b949e"></span>
+    </div>
+    <div id="ai-summary" style="font-family:monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;max-height:450px;overflow-y:auto">
+      Click "Heuristic Analysis" for rule-based analysis, or "AI Model Analysis" to call a real LLM.
+    </div>
   </div>
 </div>
 
@@ -435,12 +443,64 @@ async function fetchAnomalies(){
 
 async function fetchAI(){
   try{
-    document.getElementById('ai-summary').textContent = 'Analyzing...';
+    document.getElementById('ai-summary').textContent = 'Analyzing (heuristic)...';
     const r = await fetch('/api/logs/analysis');
     const data = await r.json();
     document.getElementById('ai-summary').textContent = data.summary || data.error || 'No analysis available';
   }catch(e){
     document.getElementById('ai-summary').textContent = 'Error: '+e.message;
+  }
+}
+
+async function fetchAIReal(){
+  try{
+    document.getElementById('ai-summary').textContent = 'Calling AI model... (may take a few seconds)';
+    document.getElementById('ai-status').textContent = '⏳ calling...';
+    const r = await fetch('/api/ai/analyze', {method:'POST'});
+    const data = await r.json();
+    if(data.source==='ai' && data.ok){
+      document.getElementById('ai-summary').textContent =
+        '=== AI Model: ' + data.model + ' (latency: ' + data.latency_ms + 'ms) ===\n\n' + data.analysis;
+      document.getElementById('ai-status').textContent = 'AI OK (' + data.latency_ms + 'ms)';
+      document.getElementById('ai-status').style.color = '#3fb950';
+    }else if(data.source==='heuristic'){
+      document.getElementById('ai-summary').textContent =
+        '=== AI not configured ===\n\n' + data.message + '\n\n--- Heuristic Fallback ---\n\n' + data.summary;
+      document.getElementById('ai-status').textContent = 'using fallback';
+      document.getElementById('ai-status').style.color = '#d29922';
+    }else{
+      document.getElementById('ai-summary').textContent =
+        'AI call failed: ' + (data.error||'unknown') + '\n\n--- Heuristic Fallback ---\n\n' + (data.fallback_summary||'');
+      document.getElementById('ai-status').textContent = 'error: ' + (data.error||'').substring(0,40);
+      document.getElementById('ai-status').style.color = '#f85149';
+    }
+  }catch(e){
+    document.getElementById('ai-summary').textContent = 'Error: '+e.message;
+    document.getElementById('ai-status').textContent = 'network error';
+  }
+}
+
+async function fetchAIConfig(){
+  try{
+    const r = await fetch('/api/ai/config');
+    const cfg = await r.json();
+    document.getElementById('ai-summary').textContent =
+      'AI Configuration:\n' +
+      '  Enabled:  ' + cfg.enabled + '\n' +
+      '  Endpoint: ' + (cfg.endpoint||'not set') + '\n' +
+      '  Model:    ' + (cfg.model||'not set') + '\n' +
+      '  Has Key:  ' + cfg.has_api_key + '\n' +
+      '  Timeout:  ' + cfg.timeout_secs + 's\n\n' +
+      'Set via env vars: AI_ENDPOINT, AI_API_KEY, AI_MODEL\n' +
+      'Or POST to /api/ai/config with JSON config.\n\n' +
+      'Examples:\n' +
+      '  Ollama (local):  endpoint=http://localhost:11434/v1/chat/completions  key=ollama\n' +
+      '  OpenAI:          endpoint=https://api.openai.com/v1/chat/completions  key=sk-...\n' +
+      '  Claude:          endpoint=https://api.anthropic.com/v1/messages      key=sk-ant-...';
+    document.getElementById('ai-status').textContent = cfg.enabled ? 'configured' : 'not configured';
+    document.getElementById('ai-status').style.color = cfg.enabled ? '#3fb950' : '#8b949e';
+  }catch(e){
+    document.getElementById('ai-status').textContent = 'error';
   }
 }
 
@@ -514,7 +574,7 @@ async function resetFault(){
 setInterval(fetchMetrics, 1000);
 fetchMetrics();
 fetchFaultStatus();
-fetchAI();
+fetchAIConfig();
 </script>
 </body>
 </html>)rawliteral";
@@ -723,6 +783,122 @@ int main(int argc, char* argv[]) {
         }
         res.set_content(arr.dump(), "application/json");
     });
+
+    // ---- AI Model Analysis ----
+    svr.Get("/api/ai/config", [](const httplib::Request&, httplib::Response& res) {
+        auto& ai = AiClient::instance();
+        json cfg = {
+            {"enabled", ai.is_enabled()},
+            {"endpoint", ai.config().endpoint},
+            {"model", ai.config().model},
+            {"timeout_secs", ai.config().timeout_secs},
+            {"has_api_key", !ai.config().api_key.empty()}
+        };
+        res.set_content(cfg.dump(), "application/json");
+    });
+
+    svr.Post("/api/ai/config", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto j = json::parse(req.body);
+            AiClient::instance().configure(
+                j.value("endpoint", ""),
+                j.value("api_key", ""),
+                j.value("model", "gpt-4o-mini"),
+                j.value("timeout", 30)
+            );
+            auto& ai = AiClient::instance();
+            json cfg = {
+                {"enabled", ai.is_enabled()},
+                {"endpoint", ai.config().endpoint},
+                {"model", ai.config().model}
+            };
+            log_event("INFO", "AI configuration updated");
+            res.set_content(cfg.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Get("/api/ai/test", [](const httplib::Request&, httplib::Response& res) {
+        auto& ai = AiClient::instance();
+        if (!ai.is_enabled()) {
+            res.set_content(json{
+                {"ok", false},
+                {"error", "AI not configured. Set AI_ENDPOINT + AI_API_KEY env vars, or POST /api/ai/config"}
+            }.dump(), "application/json");
+            return;
+        }
+
+        auto result = ai.test();
+        json r = {
+            {"ok", result.ok},
+            {"model_used", result.model_used},
+            {"latency_ms", result.latency_ms},
+            {"preview", result.ok ? result.content.substr(0, 300) : ""},
+            {"error", result.error}
+        };
+        res.set_content(r.dump(), "application/json");
+    });
+
+    svr.Post("/api/ai/analyze", [](const httplib::Request&, httplib::Response& res) {
+        auto& ai = AiClient::instance();
+        if (!ai.is_enabled()) {
+            json fallback = {
+                {"source", "heuristic"},
+                {"message", "AI not configured — using heuristic analysis instead. Set AI_ENDPOINT + AI_API_KEY."},
+                {"summary", g_analyzer.ai_summary(g_metrics.get_snapshot())}
+            };
+            res.set_content(fallback.dump(), "application/json");
+            return;
+        }
+
+        auto snapshot = g_metrics.get_snapshot();
+        auto anomalies = g_analyzer.analyze(snapshot);
+        auto logs = g_analyzer.recent_logs(300);
+
+        // Build JSON inputs for AI
+        json m_json = metrics_json();
+        json anomalies_json = json::array();
+        for (const auto& a : anomalies) {
+            anomalies_json.push_back({
+                {"type", a.type}, {"severity", a.severity},
+                {"description", a.description}, {"confidence", a.confidence}
+            });
+        }
+        json logs_json = json::array();
+        int log_count = 0;
+        for (const auto& l : logs) {
+            if (log_count++ >= 50) break;
+            logs_json.push_back({
+                {"timestamp", l.timestamp}, {"level", l.level},
+                {"message", l.message}, {"path", l.path}
+            });
+        }
+
+        auto result = ai.analyze(m_json.dump(), anomalies_json.dump(), logs_json.dump());
+
+        json response = {
+            {"source", "ai"},
+            {"model", result.model_used},
+            {"latency_ms", result.latency_ms},
+            {"ok", result.ok}
+        };
+
+        if (result.ok) {
+            response["analysis"] = result.content;
+            log_event("INFO", "AI analysis completed, latency=" + std::to_string(result.latency_ms) + "ms");
+        } else {
+            response["error"] = result.error;
+            response["fallback_summary"] = g_analyzer.ai_summary(snapshot);
+            log_event("WARN", "AI analysis failed: " + result.error);
+        }
+
+        res.set_content(response.dump(), "application/json");
+    });
+
+    // Update /api/logs/analysis to also show AI config hint
+    // (The original endpoint is above; we keep it for backward compat)
 
     // ---- Reset ----
     svr.Post("/api/reset", [](const httplib::Request&, httplib::Response& res) {
