@@ -159,34 +159,55 @@ ServiceScope/
 
 ## AI Model Integration
 
-ServiceScope can call a real LLM (not just heuristic rules) to analyze your service metrics. It supports any OpenAI-compatible API.
+ServiceScope can call a real LLM to analyze your service metrics. All OpenAI-compatible APIs are supported, including DeepSeek, Tongyi Qianwen, Ollama, and more.
 
 ### Quick Setup
 
-**Option 1: Local Ollama (free, no network needed)**
+**Option 1: DeepSeek (cheap, fast, Chinese-friendly)**
+```bash
+# Windows
+set AI_ENDPOINT=https://api.deepseek.com/v1/chat/completions
+set AI_API_KEY=sk-your-deepseek-key
+set AI_MODEL=deepseek-chat
+
+# Linux / macOS
+export AI_ENDPOINT="https://api.deepseek.com/v1/chat/completions"
+export AI_API_KEY="sk-your-deepseek-key"
+export AI_MODEL="deepseek-chat"
+./build/servicescope
+```
+
+**Option 2: Ollama (local, free, no internet)**
 ```bash
 # Install Ollama: https://ollama.com
 ollama pull llama3.2
 
-# Start ServiceScope with AI
 export AI_ENDPOINT="http://localhost:11434/v1/chat/completions"
 export AI_API_KEY="ollama"
 export AI_MODEL="llama3.2"
 ./build/servicescope
 ```
 
-**Option 2: OpenAI API**
+**Option 3: Tongyi Qianwen (Alibaba Cloud)**
+```bash
+export AI_ENDPOINT="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+export AI_API_KEY="sk-your-dashscope-key"
+export AI_MODEL="qwen-plus"
+./build/servicescope
+```
+
+**Option 4: OpenAI**
 ```bash
 export AI_ENDPOINT="https://api.openai.com/v1/chat/completions"
-export AI_API_KEY="sk-your-key-here"
+export AI_API_KEY="sk-your-key"
 export AI_MODEL="gpt-4o-mini"
 ./build/servicescope
 ```
 
-**Option 3: Claude API (Anthropic)**
+**Option 5: Claude (Anthropic)**
 ```bash
 export AI_ENDPOINT="https://api.anthropic.com/v1/messages"
-export AI_API_KEY="sk-ant-your-key-here"
+export AI_API_KEY="sk-ant-your-key"
 export AI_MODEL="claude-haiku-4-5"
 ./build/servicescope
 ```
@@ -195,8 +216,22 @@ Or configure at runtime:
 ```bash
 curl -X POST localhost:8080/api/ai/config \
   -H "Content-Type: application/json" \
-  -d '{"endpoint":"http://localhost:11434/v1/chat/completions","api_key":"ollama","model":"llama3.2"}'
+  -d '{"endpoint":"https://api.deepseek.com/v1/chat/completions","api_key":"sk-xxx","model":"deepseek-chat"}'
 ```
+
+### Supported Providers
+
+Any OpenAI-compatible API works. Tested providers:
+
+| Provider | Endpoint | Model Examples |
+|---|---|---|
+| **DeepSeek** | `https://api.deepseek.com/v1/chat/completions` | `deepseek-chat`, `deepseek-reasoner` |
+| **Ollama** (local) | `http://localhost:11434/v1/chat/completions` | `llama3.2`, `qwen2.5`, `deepseek-r1` |
+| **通义千问** | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` | `qwen-plus`, `qwen-max` |
+| **OpenAI** | `https://api.openai.com/v1/chat/completions` | `gpt-4o-mini`, `gpt-4o` |
+| **Claude** | `https://api.anthropic.com/v1/messages` | `claude-haiku-4-5`, `claude-sonnet-4-6` |
+| **vLLM** (self-hosted) | `http://your-host:8000/v1/chat/completions` | any |
+| 任意兼容接口 | `your-endpoint/v1/chat/completions` | any |
 
 ### AI Endpoints
 
@@ -211,7 +246,7 @@ curl -X POST localhost:8080/api/ai/config \
 
 1. The server collects current metrics, recent anomalies, and log entries
 2. Builds a structured prompt with all context
-3. Sends to the configured LLM
+3. Sends to the configured LLM via OpenAI-compatible protocol
 4. Returns the AI's analysis: health assessment, root cause, recommended actions
 
 If no AI is configured, `/api/ai/analyze` gracefully falls back to the built-in heuristic analyzer.
