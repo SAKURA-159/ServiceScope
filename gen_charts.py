@@ -1,254 +1,334 @@
-"""Generate SVG test result charts for README."""
-import json
+"""Generate PNG test result charts for README using Pillow."""
 import os
+from PIL import Image, ImageDraw, ImageFont
 
-def svg_qps_chart():
-    """Generate QPS & Latency vs Concurrency chart."""
-    # Test data (based on actual server-side measurements)
+# Try to find a good font, fall back to default
+FONT_FILE = None
+for path in [
+    "C:/Windows/Fonts/msyh.ttc",     # Microsoft YaHei (Chinese)
+    "C:/Windows/Fonts/consola.ttf",   # Consolas
+    "C:/Windows/Fonts/arial.ttf",     # Arial
+]:
+    if os.path.exists(path):
+        FONT_FILE = path
+        break
+
+
+def get_font(size, bold=False):
+    if FONT_FILE:
+        try:
+            return ImageFont.truetype(FONT_FILE, size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
+
+
+def text_size(draw, text, font):
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def chart_qps_latency():
+    """QPS & P99 Latency by workload type."""
+    W, H = 1200, 640
+    img = Image.new("RGB", (W, H), "#0d1117")
+    draw = ImageDraw.Draw(img)
+
+    title_font = get_font(22, bold=True)
+    label_font = get_font(14)
+    small_font = get_font(12)
+    tiny_font = get_font(11)
+
+    draw.text((W // 2, 30), "QPS & P99 Latency by Workload Type",
+              fill="#c9d1d9", font=title_font, anchor="mt")
+
     data = [
-        # (label, qps, p99_ms)
-        ("Fast\n(health)", 420, 2),
+        ("Health\nCheck", 420, 2),
         ("Quick\n(1ms)", 380, 8),
         ("Mixed\n(10ms)", 85, 22),
         ("Data\n(100)", 250, 5),
         ("Slow\n(200ms)", 25, 215),
     ]
 
-    W, H = 600, 320
-    LM, RM, TM, BM = 60, 30, 20, 40
-    bar_w = 40
-    gap = 70
-
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">
-  <rect width="{W}" height="{H}" fill="#0d1117"/>
-  <text x="{W/2}" y="20" text-anchor="middle" fill="#c9d1d9" font-size="13" font-family="sans-serif" font-weight="bold">QPS &amp; P99 Latency by Workload Type</text>'''
+    LM, RM, TM, BM = 100, 60, 60, 60
+    chart_w = W - LM - RM
+    chart_h = H - TM - BM
+    max_qps = 500
+    bar_w = 60
+    gap = 120  # gap between bar groups
 
     # Axes
-    chart_h = H - TM - BM
-    chart_w = W - LM - RM
-    max_qps = 500
+    draw.line([(LM, TM), (LM, H - BM)], fill="#30363d", width=2)
+    draw.line([(LM, H - BM), (W - RM, H - BM)], fill="#30363d", width=2)
 
-    # Y axis (QPS)
-    svg += f'''
-  <line x1="{LM}" y1="{TM}" x2="{LM}" y2="{H-BM}" stroke="#30363d" stroke-width="1"/>
-  <line x1="{LM}" y1="{H-BM}" x2="{W-RM}" y2="{H-BM}" stroke="#30363d" stroke-width="1"/>'''
+    # Y-axis labels
     for q in range(0, max_qps + 1, 100):
-        y = H - BM - (q / max_qps) * chart_h
-        svg += f'''
-  <line x1="{LM-3}" y1="{y:.0f}" x2="{LM}" y2="{y:.0f}" stroke="#30363d" stroke-width="1"/>
-  <text x="{LM-6}" y="{y+4:.0f}" text-anchor="end" fill="#8b949e" font-size="10" font-family="sans-serif">{q}</text>'''
+        y = H - BM - int((q / max_qps) * chart_h)
+        draw.line([(LM - 5, y), (LM, y)], fill="#30363d", width=1)
+        draw.text((LM - 10, y), str(q), fill="#8b949e", font=tiny_font, anchor="rm")
 
-    # Bars
+    # Bars (QPS) + P99 dots
     max_lat = 250
     for i, (label, qps, p99) in enumerate(data):
-        x = LM + 10 + i * (bar_w * 2 + gap)
-        bar_h = (qps / max_qps) * chart_h
+        x_base = LM + 30 + i * (bar_w * 2 + gap)
+        bar_h = int((qps / max_qps) * chart_h)
         y = H - BM - bar_h
 
-        svg += f'''
-  <rect x="{x:.0f}" y="{y:.0f}" width="{bar_w}" height="{bar_h:.0f}" fill="#58a6ff" rx="3"/>
-  <text x="{x+bar_w/2:.0f}" y="{y-6:.0f}" text-anchor="middle" fill="#58a6ff" font-size="11" font-family="sans-serif" font-weight="bold">{qps}</text>
-  <text x="{x+bar_w/2:.0f}" y="{H-BM+16:.0f}" text-anchor="middle" fill="#8b949e" font-size="9" font-family="sans-serif">{label}</text>'''
+        # QPS bar
+        draw.rounded_rectangle(
+            [(x_base, y), (x_base + bar_w, H - BM)],
+            radius=4, fill="#58a6ff"
+        )
+        draw.text((x_base + bar_w // 2, y - 8), str(qps),
+                  fill="#58a6ff", font=label_font, anchor="mb")
 
-        # P99 as dot
-        dot_y = H - BM - (p99 / max_lat) * chart_h
-        svg += f'''
-  <circle cx="{x+bar_w+gap/2:.0f}" cy="{dot_y:.0f}" r="5" fill="#f85149"/>
-  <text x="{x+bar_w+gap/2:.0f}" y="{dot_y-8:.0f}" text-anchor="middle" fill="#f85149" font-size="9" font-family="sans-serif">P99={p99}ms</text>'''
+        # X label
+        for j, line in enumerate(label.split("\n")):
+            draw.text((x_base + bar_w // 2, H - BM + 24 + j * 16), line,
+                      fill="#8b949e", font=tiny_font, anchor="mt")
+
+        # P99 dot
+        dot_y = H - BM - int((p99 / max_lat) * chart_h)
+        dot_x = x_base + bar_w + gap // 2
+        draw.ellipse([(dot_x - 6, dot_y - 6), (dot_x + 6, dot_y + 6)], fill="#f85149")
+        draw.text((dot_x, dot_y - 12), f"P99={p99}ms",
+                  fill="#f85149", font=small_font, anchor="mb")
 
     # Legend
-    svg += f'''
-  <rect x="{W-200}" y="{TM+5}" width="12" height="12" fill="#58a6ff" rx="2"/>
-  <text x="{W-183}" y="{TM+15}" fill="#8b949e" font-size="10" font-family="sans-serif">QPS (req/s)</text>
-  <circle cx="{W-94}" cy="{TM+11}" r="5" fill="#f85149"/>
-  <text x="{W-83}" y="{TM+15}" fill="#8b949e" font-size="10" font-family="sans-serif">P99 Latency</text>
-</svg>'''
-    return svg
+    draw.rectangle([(W - 340, TM + 8), (W - 320, TM + 24)], fill="#58a6ff")
+    draw.text((W - 312, TM + 16), "QPS (req/s)", fill="#8b949e", font=small_font, anchor="lm")
+    draw.ellipse([(W - 182, TM + 10), (W - 166, TM + 26)], fill="#f85149")
+    draw.text((W - 158, TM + 16), "P99 Latency", fill="#8b949e", font=small_font, anchor="lm")
+
+    return img
 
 
-def svg_latency_histogram():
-    """Generate latency distribution histogram."""
-    # Simulated histogram data (from server metrics)
-    buckets = ["≤1", "≤2", "≤4", "≤8", "≤16", "≤32", "≤64", "≤128", "≤256", "≤512", "≤1k", "≤2k", "≤4k", "≤8k", "≤16k", "≤32k"]
+def chart_latency_histogram():
+    """Latency distribution histogram."""
+    W, H = 1200, 560
+    img = Image.new("RGB", (W, H), "#0d1117")
+    draw = ImageDraw.Draw(img)
+
+    title_font = get_font(22, bold=True)
+    small_font = get_font(12)
+    tiny_font = get_font(10)
+
+    draw.text((W // 2, 30), "Latency Distribution (Histogram)",
+              fill="#c9d1d9", font=title_font, anchor="mt")
+
+    buckets = ["<=1", "<=2", "<=4", "<=8", "<=16", "<=32",
+               "<=64", "<=128", "<=256", "<=512", "<=1k",
+               "<=2k", "<=4k", "<=8k", "<=16k", "<=32k"]
     counts = [1200, 800, 450, 280, 160, 80, 45, 25, 12, 5, 3, 1, 0, 0, 0, 0]
 
-    W, H = 600, 280
-    LM, RM, TM, BM = 50, 20, 30, 50
+    LM, RM, TM, BM = 80, 60, 60, 80
     chart_w = W - LM - RM
     chart_h = H - TM - BM
     max_count = 1300
-    bar_w = (chart_w / len(buckets)) * 0.7
     step = chart_w / len(buckets)
-
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">
-  <rect width="{W}" height="{H}" fill="#0d1117"/>
-  <text x="{W/2}" y="20" text-anchor="middle" fill="#c9d1d9" font-size="13" font-family="sans-serif" font-weight="bold">Latency Distribution (Histogram)</text>'''
+    bar_w = step * 0.65
 
     for i, (bucket, count) in enumerate(zip(buckets, counts)):
-        x = LM + i * step
-        bar_h = (count / max_count) * chart_h if count > 0 else 0
+        x = LM + i * step + (step - bar_w) / 2
+        bar_h = int((count / max_count) * chart_h) if count > 0 else 0
         y = H - BM - bar_h
-        color = "#3fb950" if i < 8 else ("#d29922" if i < 12 else "#f85149")
-        svg += f'''
-  <rect x="{x+2:.0f}" y="{y:.0f}" width="{bar_w:.0f}" height="{max(bar_h,0):.0f}" fill="{color}" rx="2" opacity="0.8"/>'''
-        if i % 3 == 0:
-            svg += f'''
-  <text x="{x+bar_w/2:.0f}" y="{H-BM+14:.0f}" text-anchor="middle" fill="#8b949e" font-size="8" font-family="sans-serif" transform="rotate(-30,{x+bar_w/2:.0f},{H-BM+14:.0f})">{bucket}</text>'''
 
-    # Y axis
-    svg += f'''
-  <line x1="{LM}" y1="{TM}" x2="{LM}" y2="{H-BM}" stroke="#30363d" stroke-width="1"/>'''
+        if i < 8:
+            color = "#3fb950"
+        elif i < 12:
+            color = "#d29922"
+        else:
+            color = "#f85149"
+
+        draw.rectangle([(x, y), (x + bar_w, H - BM)], fill=color)
+
+        if i % 2 == 0:
+            tw, _ = text_size(draw, bucket, tiny_font)
+            draw.text((x + bar_w / 2, H - BM + 10), bucket,
+                      fill="#8b949e", font=tiny_font, anchor="mt")
+
+    # Axes
+    draw.line([(LM, TM), (LM, H - BM)], fill="#30363d", width=2)
+    draw.line([(LM, H - BM), (W - RM, H - BM)], fill="#30363d", width=2)
+
     for n in range(0, max_count + 1, 200):
-        y = H - BM - (n / max_count) * chart_h
-        svg += f'''
-  <text x="{LM-6}" y="{y+4:.0f}" text-anchor="end" fill="#8b949e" font-size="9" font-family="sans-serif">{n}</text>
-  <line x1="{LM}" y1="{y:.0f}" x2="{W-RM}" y2="{y:.0f}" stroke="#30363d33" stroke-width="1"/>'''
+        y = H - BM - int((n / max_count) * chart_h)
+        draw.text((LM - 8, y), str(n), fill="#8b949e", font=tiny_font, anchor="rm")
+        draw.line([(LM, y), (W - RM, y)], fill="#30363d22", width=1)
 
     # Legend
-    svg += f'''
-  <rect x="{W-360}" y="{TM+5}" width="10" height="10" fill="#3fb950" rx="2" opacity="0.8"/>
-  <text x="{W-344}" y="{TM+14}" fill="#8b949e" font-size="9" font-family="sans-serif">OK (&lt;128ms)</text>
-  <rect x="{W-240}" y="{TM+5}" width="10" height="10" fill="#d29922" rx="2" opacity="0.8"/>
-  <text x="{W-224}" y="{TM+14}" fill="#8b949e" font-size="9" font-family="sans-serif">Slow (128-512ms)</text>
-  <rect x="{W-110}" y="{TM+5}" width="10" height="10" fill="#f85149" rx="2" opacity="0.8"/>
-  <text x="{W-94}" y="{TM+14}" fill="#8b949e" font-size="9" font-family="sans-serif">Bad (&gt;512ms)</text>
-</svg>'''
-    return svg
+    draw.rectangle([(W - 430, TM + 8), (W - 414, TM + 22)], fill="#3fb950")
+    draw.text((W - 408, TM + 15), "Fast (<128ms)", fill="#8b949e", font=small_font, anchor="lm")
+    draw.rectangle([(W - 270, TM + 8), (W - 254, TM + 22)], fill="#d29922")
+    draw.text((W - 248, TM + 15), "Slow (128-512ms)", fill="#8b949e", font=small_font, anchor="lm")
+    draw.rectangle([(W - 110, TM + 8), (W - 94, TM + 22)], fill="#f85149")
+    draw.text((W - 88, TM + 15), "Bad (>512ms)", fill="#8b949e", font=small_font, anchor="lm")
+
+    return img
 
 
-def svg_fault_injection():
-    """Generate fault injection test result chart."""
-    W, H = 600, 280
-    LM, RM, TM, BM = 80, 30, 30, 40
-    chart_w = W - LM - RM
-    chart_h = H - TM - BM
+def chart_fault_injection():
+    """Fault injection test results."""
+    W, H = 1200, 560
+    img = Image.new("RGB", (W, H), "#0d1117")
+    draw = ImageDraw.Draw(img)
 
-    # Test phases
-    phases = ["Normal\n(0-10s)", "Delay 2s\n(10-20s)", "50% Errors\n(20-30s)", "Connection\nDrop (30-40s)", "Recovery\n(40-50s)"]
+    title_font = get_font(22, bold=True)
+    small_font = get_font(12)
+    tiny_font = get_font(10)
+
+    draw.text((W // 2, 30), "Fault Injection Test Results",
+              fill="#c9d1d9", font=title_font, anchor="mt")
+
+    phases = ["Normal\n(0-10s)", "Delay=2s\n(10-20s)", "50% Errors\n(20-30s)",
+              "Conn Drop\n(30-40s)", "Recovery\n(40-50s)"]
     p99_lat = [8, 2150, 12, 8, 10]
     error_rate = [0, 0, 48.5, 0, 0]
     qps = [380, 3, 42, 0, 370]
 
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">
-  <rect width="{W}" height="{H}" fill="#0d1117"/>
-  <text x="{W/2}" y="20" text-anchor="middle" fill="#c9d1d9" font-size="13" font-family="sans-serif" font-weight="bold">Fault Injection Test Results</text>'''
+    LM, RM, TM, BM = 100, 60, 60, 80
+    chart_w = W - LM - RM
+    chart_h = H - TM - BM
+    max_lat = 2500
+    max_qps = 450
+    phase_w = chart_w / len(phases)
 
     # Phase backgrounds
-    phase_w = chart_w / len(phases)
-    colors_bg = ["#3fb95015", "#d2992215", "#f8514915", "#f8514925", "#3fb95015"]
-    for i, (phase, bg) in enumerate(zip(phases, colors_bg)):
+    bg_colors = ["#3fb95010", "#d2992210", "#f8514910", "#f8514920", "#3fb95010"]
+    for i, (phase, bg) in enumerate(zip(phases, bg_colors)):
         x = LM + i * phase_w
-        svg += f'''
-  <rect x="{x:.0f}" y="{TM}" width="{phase_w:.0f}" height="{chart_h:.0f}" fill="{bg}" stroke="#30363d" stroke-width="1" stroke-dasharray="2,2"/>
-  <text x="{x+phase_w/2:.0f}" y="{H-4:.0f}" text-anchor="middle" fill="#8b949e" font-size="8" font-family="sans-serif">{phase}</text>'''
+        draw.rectangle([(x, TM), (x + phase_w, H - BM)], fill=bg, outline="#30363d55")
+        for j, line in enumerate(phase.split("\n")):
+            draw.text((x + phase_w / 2, H - BM + 10 + j * 14), line,
+                      fill="#8b949e", font=tiny_font, anchor="mt")
 
-    # Data points for P99 latency
-    max_lat = 2500
+    # P99 latency line
     points = []
     for i, v in enumerate(p99_lat):
-        x = LM + phase_w/2 + i * phase_w
+        x = LM + phase_w / 2 + i * phase_w
         y = TM + chart_h - (v / max_lat) * chart_h
-        points.append(f"{x:.0f},{y:.0f}")
+        points.append((x, y))
+        draw.ellipse([(x - 5, y - 5), (x + 5, y + 5)], fill="#58a6ff")
+        label_offset = -16 if v > 1000 else 16
+        draw.text((x, y + label_offset), f"{v}ms",
+                  fill="#58a6ff", font=small_font, anchor="mm")
 
-    svg += f'''
-  <polyline points="{' '.join(points)}" fill="none" stroke="#58a6ff" stroke-width="2"/>
-  <text x="{W-RM}" y="{TM+chart_h-5:.0f}" fill="#58a6ff" font-size="9" font-family="sans-serif">P99 Latency</text>'''
+    for i in range(len(points) - 1):
+        draw.line([points[i], points[i + 1]], fill="#58a6ff", width=3)
 
-    for i, v in enumerate(p99_lat):
-        x = LM + phase_w/2 + i * phase_w
-        y = TM + chart_h - (v / max_lat) * chart_h
-        svg += f'''
-  <circle cx="{x:.0f}" cy="{y:.0f}" r="4" fill="#58a6ff"/>
-  <text x="{x:.0f}" y="{y-8:.0f}" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="sans-serif">{v}ms</text>'''
+    draw.text((W - RM - 80, TM + chart_h - 10), "P99 Latency",
+              fill="#58a6ff", font=small_font, anchor="rb")
 
-    # Error rate as bars
+    # Error rate bars
     for i, v in enumerate(error_rate):
-        x = LM + phase_w/2 + i * phase_w - phase_w/6
+        x = LM + phase_w / 2 + i * phase_w - phase_w / 6
         bar_h = (v / 100) * chart_h if v > 0 else 0
         y = TM + chart_h - bar_h
-        svg += f'''
-  <rect x="{x-8:.0f}" y="{y:.0f}" width="16" height="{bar_h:.0f}" fill="#f85149" rx="2" opacity="0.8"/>'''
+        draw.rectangle([(x - 12, y), (x + 12, TM + chart_h)], fill="#f85149")
         if v > 0:
-            svg += f'''
-  <text x="{x:.0f}" y="{y-6:.0f}" text-anchor="middle" fill="#f85149" font-size="9" font-family="sans-serif">{v}%</text>'''
+            draw.text((x, y - 10), f"{v}%", fill="#f85149", font=small_font, anchor="mb")
 
     # QPS bars
-    max_qps = 450
     for i, v in enumerate(qps):
-        x = LM + phase_w/2 + i * phase_w + phase_w/6
+        x = LM + phase_w / 2 + i * phase_w + phase_w / 6
         bar_h = (v / max_qps) * chart_h if v > 0 else 0
         y = TM + chart_h - bar_h
-        svg += f'''
-  <rect x="{x-8:.0f}" y="{y:.0f}" width="16" height="{bar_h:.0f}" fill="#3fb950" rx="2" opacity="0.6"/>'''
+        draw.rectangle([(x - 12, y), (x + 12, TM + chart_h)], fill="#3fb950")
         if v > 0:
-            svg += f'''
-  <text x="{x:.0f}" y="{y-6:.0f}" text-anchor="middle" fill="#3fb950" font-size="8" font-family="sans-serif">{v}</text>'''
+            draw.text((x, y - 10), str(v), fill="#3fb950", font=tiny_font, anchor="mb")
 
     # Legend
-    svg += f'''
-  <line x1="{LM}" y1="{TM+40}" x2="{LM+20}" y2="{TM+40}" stroke="#58a6ff" stroke-width="2"/>
-  <text x="{LM+25}" y="{TM+43}" fill="#8b949e" font-size="9" font-family="sans-serif">P99 Latency</text>
-  <rect x="{LM+120}" y="{TM+32}" width="12" height="12" fill="#f85149" rx="2" opacity="0.8"/>
-  <text x="{LM+137}" y="{TM+43}" fill="#8b949e" font-size="9" font-family="sans-serif">Error Rate %</text>
-  <rect x="{LM+230}" y="{TM+32}" width="12" height="12" fill="#3fb950" rx="2" opacity="0.6"/>
-  <text x="{LM+247}" y="{TM+43}" fill="#8b949e" font-size="9" font-family="sans-serif">QPS</text>
-</svg>'''
-    return svg
+    draw.line([(LM + 10, TM + 36), (LM + 40, TM + 36)], fill="#58a6ff", width=3)
+    draw.text((LM + 48, TM + 36), "P99 Latency", fill="#8b949e", font=small_font, anchor="lm")
+    draw.rectangle([(LM + 170, TM + 28), (LM + 188, TM + 44)], fill="#f85149")
+    draw.text((LM + 196, TM + 36), "Error Rate %", fill="#8b949e", font=small_font, anchor="lm")
+    draw.rectangle([(LM + 310, TM + 28), (LM + 328, TM + 44)], fill="#3fb950")
+    draw.text((LM + 336, TM + 36), "QPS", fill="#8b949e", font=small_font, anchor="lm")
+
+    return img
 
 
-def svg_anomaly_detection():
-    """Generate anomaly detection accuracy chart."""
-    W, H = 500, 280
-    LM, RM, TM, BM = 130, 30, 30, 40
-    chart_h = H - TM - BM
+def chart_anomaly_detection():
+    """Anomaly detection accuracy chart."""
+    W, H = 1000, 560
+    img = Image.new("RGB", (W, H), "#0d1117")
+    draw = ImageDraw.Draw(img)
 
-    # Anomaly types and detection results
+    title_font = get_font(22, bold=True)
+    label_font = get_font(15)
+    small_font = get_font(12)
+    tiny_font = get_font(11)
+
+    draw.text((W // 2, 30), "Anomaly Detection Accuracy",
+              fill="#c9d1d9", font=title_font, anchor="mt")
+
     anomalies = [
-        ("qps_spike", "QPS Spike", 95, "critical"),
-        ("error_spike", "Error Spike", 92, "critical"),
-        ("latency_spike", "Latency Spike", 88, "high"),
-        ("connection_flood", "Connection Flood", 90, "high"),
-        ("slow_request_surge", "Slow Request Surge", 85, "medium"),
-        ("error_flood", "Error Flood", 93, "medium"),
+        ("QPS Spike", 95, "critical", "#f85149"),
+        ("Error Spike", 92, "critical", "#f85149"),
+        ("Latency Spike", 88, "high", "#d29922"),
+        ("Connection Flood", 90, "high", "#d29922"),
+        ("Slow Request Surge", 85, "medium", "#58a6ff"),
+        ("Error Flood", 93, "medium", "#58a6ff"),
     ]
 
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">
-  <rect width="{W}" height="{H}" fill="#0d1117"/>
-  <text x="{W/2}" y="20" text-anchor="middle" fill="#c9d1d9" font-size="13" font-family="sans-serif" font-weight="bold">Anomaly Detection Accuracy</text>'''
+    LM, RM, TM, BM = 200, 80, 60, 40
+    chart_w = W - LM - RM
+    bar_h_total = 48
+    gap = 16
 
-    bar_h_total = chart_h / len(anomalies) - 6
-    color_map = {"critical": "#f85149", "high": "#d29922", "medium": "#58a6ff"}
+    for i, (name, acc, severity, color) in enumerate(anomalies):
+        y = TM + 20 + i * (bar_h_total + gap)
+        bar_w = int((acc / 100) * chart_w)
 
-    for i, (atype, name, acc, severity) in enumerate(anomalies):
-        y = TM + 10 + i * (bar_h_total + 6)
-        bar_w = (acc / 100) * (W - LM - RM)
-        color = color_map[severity]
+        draw.text((LM - 12, y + bar_h_total // 2), name,
+                  fill="#c9d1d9", font=label_font, anchor="rm")
 
-        svg += f'''
-  <text x="{LM-6}" y="{y+bar_h_total/2+4:.0f}" text-anchor="end" fill="#c9d1d9" font-size="11" font-family="sans-serif">{name}</text>
-  <rect x="{LM}" y="{y:.0f}" width="{W-LM-RM}" height="{bar_h_total:.0f}" fill="#30363d" rx="3"/>
-  <rect x="{LM}" y="{y:.0f}" width="{bar_w:.0f}" height="{bar_h_total:.0f}" fill="{color}" rx="3" opacity="0.8"/>
-  <text x="{LM+bar_w+8:.0f}" y="{y+bar_h_total/2+4:.0f}" fill="{color}" font-size="11" font-family="sans-serif" font-weight="bold">{acc}%</text>
-  <text x="{W-RM}" y="{y+bar_h_total/2+4:.0f}" text-anchor="end" fill="#8b949e" font-size="9" font-family="sans-serif">[{severity}]</text>'''
+        # Background bar
+        draw.rounded_rectangle(
+            [(LM, y), (LM + chart_w, y + bar_h_total)],
+            radius=6, fill="#1c2333"
+        )
+        # Filled bar
+        draw.rounded_rectangle(
+            [(LM, y), (LM + bar_w, y + bar_h_total)],
+            radius=6, fill=color
+        )
+        # Percentage
+        draw.text((LM + bar_w + 12, y + bar_h_total // 2), f"{acc}%",
+                  fill=color, font=label_font, anchor="lm")
+        # Severity
+        draw.text((W - RM, y + bar_h_total // 2), f"[{severity}]",
+                  fill="#8b949e", font=small_font, anchor="rm")
 
-    svg += f'''
-</svg>'''
-    return svg
+    return img
 
 
-# Generate and save SVGs
-script_dir = os.path.dirname(os.path.abspath(__file__))
-charts = [
-    ("test_qps_latency.svg", svg_qps_chart()),
-    ("test_latency_histogram.svg", svg_latency_histogram()),
-    ("test_fault_injection.svg", svg_fault_injection()),
-    ("test_anomaly_detection.svg", svg_anomaly_detection()),
-]
+def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
 
-for name, content in charts:
-    path = os.path.join(script_dir, name)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(content)
-    print(f"Generated: {name}")
+    charts = [
+        ("test_qps_latency.png", chart_qps_latency),
+        ("test_latency_histogram.png", chart_latency_histogram),
+        ("test_fault_injection.png", chart_fault_injection),
+        ("test_anomaly_detection.png", chart_anomaly_detection),
+    ]
 
-print("Done! All SVG charts generated.")
+    for name, func in charts:
+        img = func()
+        path = os.path.join(script_dir, name)
+        img.save(path, "PNG")
+        print(f"Generated: {name} ({img.width}x{img.height})")
+
+    # Remove old SVGs — replaced by PNGs
+    for svg in ["test_qps_latency.svg", "test_latency_histogram.svg",
+                "test_fault_injection.svg", "test_anomaly_detection.svg"]:
+        svg_path = os.path.join(script_dir, svg)
+        if os.path.exists(svg_path):
+            os.remove(svg_path)
+            print(f"Removed old: {svg}")
+
+    print("Done! PNG charts ready.")
+
+
+if __name__ == "__main__":
+    main()

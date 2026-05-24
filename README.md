@@ -153,9 +153,9 @@ python stress_test.py --mode data --concurrency 50 --duration 20
 
 ### 测试结果总览
 
-![QPS 与延迟](test_qps_latency.svg)
+![QPS 与延迟](test_qps_latency.png)
 
-![延迟分布直方图](test_latency_histogram.svg)
+![延迟分布直方图](test_latency_histogram.png)
 
 #### 场景 1：健康检查 — 极限 QPS
 
@@ -217,7 +217,7 @@ SERVER-SIDE METRICS
 
 ### 故障注入测试
 
-![故障注入测试结果](test_fault_injection.svg)
+![故障注入测试结果](test_fault_injection.png)
 
 #### 注入 50% 错误率
 
@@ -257,7 +257,7 @@ POST /api/reset         → 清空所有指标
 
 ### 异常检测验证
 
-![异常检测准确率](test_anomaly_detection.svg)
+![异常检测准确率](test_anomaly_detection.png)
 
 | 异常类型 | 触发条件 | 检测率 | 误报率 |
 |---|---|---|---|
