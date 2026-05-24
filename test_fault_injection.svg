@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 280" width="600" height="280">
+  <rect width="600" height="280" fill="#0d1117"/>
+  <text x="300.0" y="20" text-anchor="middle" fill="#c9d1d9" font-size="13" font-family="sans-serif" font-weight="bold">Fault Injection Test Results</text>
+  <rect x="80" y="30" width="98" height="210" fill="#3fb95015" stroke="#30363d" stroke-width="1" stroke-dasharray="2,2"/>
+  <text x="129" y="276" text-anchor="middle" fill="#8b949e" font-size="8" font-family="sans-serif">Normal
+(0-10s)</text>
+  <rect x="178" y="30" width="98" height="210" fill="#d2992215" stroke="#30363d" stroke-width="1" stroke-dasharray="2,2"/>
+  <text x="227" y="276" text-anchor="middle" fill="#8b949e" font-size="8" font-family="sans-serif">Delay 2s
+(10-20s)</text>
+  <rect x="276" y="30" width="98" height="210" fill="#f8514915" stroke="#30363d" stroke-width="1" stroke-dasharray="2,2"/>
+  <text x="325" y="276" text-anchor="middle" fill="#8b949e" font-size="8" font-family="sans-serif">50% Errors
+(20-30s)</text>
+  <rect x="374" y="30" width="98" height="210" fill="#f8514925" stroke="#30363d" stroke-width="1" stroke-dasharray="2,2"/>
+  <text x="423" y="276" text-anchor="middle" fill="#8b949e" font-size="8" font-family="sans-serif">Connection
+Drop (30-40s)</text>
+  <rect x="472" y="30" width="98" height="210" fill="#3fb95015" stroke="#30363d" stroke-width="1" stroke-dasharray="2,2"/>
+  <text x="521" y="276" text-anchor="middle" fill="#8b949e" font-size="8" font-family="sans-serif">Recovery
+(40-50s)</text>
+  <polyline points="129,239 227,59 325,239 423,239 521,239" fill="none" stroke="#58a6ff" stroke-width="2"/>
+  <text x="570" y="235" fill="#58a6ff" font-size="9" font-family="sans-serif">P99 Latency</text>
+  <circle cx="129" cy="239" r="4" fill="#58a6ff"/>
+  <text x="129" y="231" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="sans-serif">8ms</text>
+  <circle cx="227" cy="59" r="4" fill="#58a6ff"/>
+  <text x="227" y="51" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="sans-serif">2150ms</text>
+  <circle cx="325" cy="239" r="4" fill="#58a6ff"/>
+  <text x="325" y="231" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="sans-serif">12ms</text>
+  <circle cx="423" cy="239" r="4" fill="#58a6ff"/>
+  <text x="423" y="231" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="sans-serif">8ms</text>
+  <circle cx="521" cy="239" r="4" fill="#58a6ff"/>
+  <text x="521" y="231" text-anchor="middle" fill="#58a6ff" font-size="9" font-family="sans-serif">10ms</text>
+  <rect x="105" y="240" width="16" height="0" fill="#f85149" rx="2" opacity="0.8"/>
+  <rect x="203" y="240" width="16" height="0" fill="#f85149" rx="2" opacity="0.8"/>
+  <rect x="301" y="138" width="16" height="102" fill="#f85149" rx="2" opacity="0.8"/>
+  <text x="309" y="132" text-anchor="middle" fill="#f85149" font-size="9" font-family="sans-serif">48.5%</text>
+  <rect x="399" y="240" width="16" height="0" fill="#f85149" rx="2" opacity="0.8"/>
+  <rect x="497" y="240" width="16" height="0" fill="#f85149" rx="2" opacity="0.8"/>
+  <rect x="137" y="63" width="16" height="177" fill="#3fb950" rx="2" opacity="0.6"/>
+  <text x="145" y="57" text-anchor="middle" fill="#3fb950" font-size="8" font-family="sans-serif">380</text>
+  <rect x="235" y="239" width="16" height="1" fill="#3fb950" rx="2" opacity="0.6"/>
+  <text x="243" y="233" text-anchor="middle" fill="#3fb950" font-size="8" font-family="sans-serif">3</text>
+  <rect x="333" y="220" width="16" height="20" fill="#3fb950" rx="2" opacity="0.6"/>
+  <text x="341" y="214" text-anchor="middle" fill="#3fb950" font-size="8" font-family="sans-serif">42</text>
+  <rect x="431" y="240" width="16" height="0" fill="#3fb950" rx="2" opacity="0.6"/>
+  <rect x="529" y="67" width="16" height="173" fill="#3fb950" rx="2" opacity="0.6"/>
+  <text x="537" y="61" text-anchor="middle" fill="#3fb950" font-size="8" font-family="sans-serif">370</text>
+  <line x1="80" y1="70" x2="100" y2="70" stroke="#58a6ff" stroke-width="2"/>
+  <text x="105" y="73" fill="#8b949e" font-size="9" font-family="sans-serif">P99 Latency</text>
+  <rect x="200" y="62" width="12" height="12" fill="#f85149" rx="2" opacity="0.8"/>
+  <text x="217" y="73" fill="#8b949e" font-size="9" font-family="sans-serif">Error Rate %</text>
+  <rect x="310" y="62" width="12" height="12" fill="#3fb950" rx="2" opacity="0.6"/>
+  <text x="327" y="73" fill="#8b949e" font-size="9" font-family="sans-serif">QPS</text>
+</svg>

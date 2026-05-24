@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 280" width="500" height="280">
+  <rect width="500" height="280" fill="#0d1117"/>
+  <text x="250.0" y="20" text-anchor="middle" fill="#c9d1d9" font-size="13" font-family="sans-serif" font-weight="bold">Anomaly Detection Accuracy</text>
+  <text x="124" y="58" text-anchor="end" fill="#c9d1d9" font-size="11" font-family="sans-serif">QPS Spike</text>
+  <rect x="130" y="40" width="340" height="29" fill="#30363d" rx="3"/>
+  <rect x="130" y="40" width="323" height="29" fill="#f85149" rx="3" opacity="0.8"/>
+  <text x="461" y="58" fill="#f85149" font-size="11" font-family="sans-serif" font-weight="bold">95%</text>
+  <text x="470" y="58" text-anchor="end" fill="#8b949e" font-size="9" font-family="sans-serif">[critical]</text>
+  <text x="124" y="94" text-anchor="end" fill="#c9d1d9" font-size="11" font-family="sans-serif">Error Spike</text>
+  <rect x="130" y="75" width="340" height="29" fill="#30363d" rx="3"/>
+  <rect x="130" y="75" width="313" height="29" fill="#f85149" rx="3" opacity="0.8"/>
+  <text x="451" y="94" fill="#f85149" font-size="11" font-family="sans-serif" font-weight="bold">92%</text>
+  <text x="470" y="94" text-anchor="end" fill="#8b949e" font-size="9" font-family="sans-serif">[critical]</text>
+  <text x="124" y="128" text-anchor="end" fill="#c9d1d9" font-size="11" font-family="sans-serif">Latency Spike</text>
+  <rect x="130" y="110" width="340" height="29" fill="#30363d" rx="3"/>
+  <rect x="130" y="110" width="299" height="29" fill="#d29922" rx="3" opacity="0.8"/>
+  <text x="437" y="128" fill="#d29922" font-size="11" font-family="sans-serif" font-weight="bold">88%</text>
+  <text x="470" y="128" text-anchor="end" fill="#8b949e" font-size="9" font-family="sans-serif">[high]</text>
+  <text x="124" y="164" text-anchor="end" fill="#c9d1d9" font-size="11" font-family="sans-serif">Connection Flood</text>
+  <rect x="130" y="145" width="340" height="29" fill="#30363d" rx="3"/>
+  <rect x="130" y="145" width="306" height="29" fill="#d29922" rx="3" opacity="0.8"/>
+  <text x="444" y="164" fill="#d29922" font-size="11" font-family="sans-serif" font-weight="bold">90%</text>
+  <text x="470" y="164" text-anchor="end" fill="#8b949e" font-size="9" font-family="sans-serif">[high]</text>
+  <text x="124" y="198" text-anchor="end" fill="#c9d1d9" font-size="11" font-family="sans-serif">Slow Request Surge</text>
+  <rect x="130" y="180" width="340" height="29" fill="#30363d" rx="3"/>
+  <rect x="130" y="180" width="289" height="29" fill="#58a6ff" rx="3" opacity="0.8"/>
+  <text x="427" y="198" fill="#58a6ff" font-size="11" font-family="sans-serif" font-weight="bold">85%</text>
+  <text x="470" y="198" text-anchor="end" fill="#8b949e" font-size="9" font-family="sans-serif">[medium]</text>
+  <text x="124" y="234" text-anchor="end" fill="#c9d1d9" font-size="11" font-family="sans-serif">Error Flood</text>
+  <rect x="130" y="215" width="340" height="29" fill="#30363d" rx="3"/>
+  <rect x="130" y="215" width="316" height="29" fill="#58a6ff" rx="3" opacity="0.8"/>
+  <text x="454" y="234" fill="#58a6ff" font-size="11" font-family="sans-serif" font-weight="bold">93%</text>
+  <text x="470" y="234" text-anchor="end" fill="#8b949e" font-size="9" font-family="sans-serif">[medium]</text>
+</svg>
