@@ -181,10 +181,18 @@ public:
         total_requests_.store(0);
         total_errors_.store(0);
         for (int i = 0; i < kNumBuckets; ++i) latency_buckets_[i].store(0);
-        std::lock_guard<std::mutex> l1(ts_mutex_);
-        request_timestamps_.clear();
-        std::lock_guard<std::mutex> l2(slow_mutex_);
-        slow_requests_.clear();
+        {
+            std::lock_guard<std::mutex> l1(ts_mutex_);
+            request_timestamps_.clear();
+        }
+        {
+            std::lock_guard<std::mutex> l2(err_mutex_);
+            error_timestamps_.clear();
+        }
+        {
+            std::lock_guard<std::mutex> l3(slow_mutex_);
+            slow_requests_.clear();
+        }
     }
 
 private:

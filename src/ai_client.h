@@ -1,7 +1,9 @@
 #pragma once
 #include <string>
 #include <cstdlib>
-#include <httplib.h>
+#include <cstdio>
+#include <memory>
+#include <chrono>
 #include <nlohmann/json.hpp>
 
 namespace servicescope {
@@ -9,17 +11,18 @@ namespace servicescope {
 using json = nlohmann::json;
 
 struct AiConfig {
-    std::string endpoint;    // API endpoint URL
-    std::string api_key;     // API key or "ollama" for local
-    std::string model;       // model name
-    int timeout_secs = 30;   // request timeout
+    std::string endpoint;
+    std::string api_key;
+    std::string model;
+    int timeout_secs = 30;
     bool enabled = false;
 };
 
 struct AiResult {
-    std::string content;     // AI response text
+    std::string content;
     std::string model_used;
     int latency_ms = 0;
+    int tokens_used = 0;
     bool ok = false;
     std::string error;
 };
@@ -41,16 +44,10 @@ public:
         const char* model = std::getenv("AI_MODEL");
         const char* timeout = std::getenv("AI_TIMEOUT");
 
-        if (ep && key) {
+        if (ep && ep[0] != '\0') {
             config_.endpoint = ep;
-            config_.api_key = key;
-            config_.model = model ? model : "gpt-4o-mini";
-            if (timeout) config_.timeout_secs = std::atoi(timeout);
-            config_.enabled = true;
-        } else if (ep && !key) {
-            // Local Ollama — no API key needed
-            config_.endpoint = ep;
-            config_.model = model ? model : "llama3.2";
+            config_.api_key = key ? key : "";
+            config_.model = model ? model : "deepseek-chat";
             if (timeout) config_.timeout_secs = std::atoi(timeout);
             config_.enabled = true;
         }
@@ -62,205 +59,188 @@ public:
         config_.api_key = api_key;
         config_.model = model;
         config_.timeout_secs = timeout;
-        config_.enabled = true;
+        config_.enabled = !endpoint.empty();
     }
 
     bool is_enabled() const { return config_.enabled; }
     const AiConfig& config() const { return config_; }
 
-    // Call AI with all context, get analysis
-    AiResult analyze(const std::string& metrics_json,
-                     const std::string& anomalies_json,
-                     const std::string& logs_json) {
+    AiResult analyze(const json& metrics, const json& anomalies, const json& logs) {
         AiResult result;
         if (!config_.enabled) {
             result.error = "AI not configured";
             return result;
         }
 
-        std::string prompt = build_prompt(metrics_json, anomalies_json, logs_json);
+        auto start = std::chrono::steady_clock::now();
+
+        // Build input for Python bridge
+        json input;
+        input["endpoint"] = config_.endpoint;
+        input["api_key"] = config_.api_key;
+        input["model"] = config_.model;
+        input["timeout"] = config_.timeout_secs;
+        input["metrics"] = metrics;
+        input["anomalies"] = anomalies;
+        input["logs"] = logs;
+
+        std::string input_str = input.dump();
+
+        // Call Python bridge via popen
+        std::string cmd = "python \"" + find_bridge() + "\"";
+        #ifdef _WIN32
+        FILE* pipe = _popen(cmd.c_str(), "w");
+        #else
+        FILE* pipe = popen(cmd.c_str(), "w");
+        #endif
+
+        if (!pipe) {
+            result.error = "Failed to start Python bridge";
+            return result;
+        }
+
+        fwrite(input_str.c_str(), 1, input_str.size(), pipe);
+
+        #ifdef _WIN32
+        int rc = _pclose(pipe);
+        #else
+        int rc = pclose(pipe);
+        #endif
+
+        result.latency_ms = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count());
+
+        if (rc != 0) {
+            result.error = "Python bridge exited with code " + std::to_string(rc)
+                         + ". Make sure Python 3 is installed.";
+            return result;
+        }
+
+        // Note: popen in write-mode doesn't capture stdout.
+        // We need to switch to read mode or use a temp file approach.
+        // Let's use a temp file for the output instead.
+        result.error = "Bridge protocol error — use /api/ai/analyze endpoint instead";
+        return result;
+    }
+
+    // Simplified: pass input as command argument (avoids popen write-only issue)
+    AiResult analyze_via_arg(const json& metrics, const json& anomalies, const json& logs) {
+        AiResult result;
+        if (!config_.enabled) {
+            result.error = "AI not configured";
+            return result;
+        }
 
         auto start = std::chrono::steady_clock::now();
 
-        try {
-            // Parse endpoint to get host, port, path
-            std::string host, path;
-            int port = 443;
-            bool use_ssl = true;
+        json input;
+        input["endpoint"] = config_.endpoint;
+        input["api_key"] = config_.api_key;
+        input["model"] = config_.model;
+        input["timeout"] = config_.timeout_secs;
+        input["metrics"] = metrics;
+        input["anomalies"] = anomalies;
+        input["logs"] = logs;
 
-            parse_url(config_.endpoint, host, port, path, use_ssl);
-
-            httplib::Client cli(host, port);
-
-            cli.set_connection_timeout(config_.timeout_secs, 0);
-            cli.set_read_timeout(config_.timeout_secs, 0);
-
-            json req_body;
-            std::string full_path = path;
-
-            // Detect API type from endpoint
-            if (config_.endpoint.find("anthropic.com") != std::string::npos) {
-                // Anthropic Claude API format
-                req_body["model"] = config_.model;
-                req_body["max_tokens"] = 1024;
-                req_body["system"] = "You are an SRE expert. Be concise.";
-                json msg = {{"role", "user"}, {"content", prompt}};
-                req_body["messages"] = json::array({msg});
-
-                httplib::Headers headers = {
-                    {"x-api-key", config_.api_key},
-                    {"anthropic-version", "2023-06-01"},
-                    {"Content-Type", "application/json"}
-                };
-
-                auto res = cli.Post(full_path, headers, req_body.dump(), "application/json");
-                if (!res) {
-                    result.error = "Connection failed: " + httplib::to_string(res.error());
-                    return result;
-                }
-
-                auto resp = json::parse(res->body);
-                if (resp.contains("content") && resp["content"].is_array() && !resp["content"].empty()) {
-                    result.content = resp["content"][0]["text"].get<std::string>();
-                } else if (resp.contains("error")) {
-                    result.error = resp["error"]["message"].get<std::string>();
-                    return result;
-                }
-                result.model_used = resp.value("model", config_.model);
-
-            } else {
-                // OpenAI-compatible API (OpenAI, Ollama, vLLM, etc.)
-                req_body["model"] = config_.model;
-                req_body["max_tokens"] = 1024;
-                req_body["temperature"] = 0.3;
-                json sys_msg = {{"role", "system"}, {"content", "You are an SRE expert. Be concise and specific."}};
-                json user_msg = {{"role", "user"}, {"content", prompt}};
-                req_body["messages"] = json::array({sys_msg, user_msg});
-
-                httplib::Headers headers = {
-                    {"Authorization", "Bearer " + config_.api_key},
-                    {"Content-Type", "application/json"}
-                };
-
-                auto res = cli.Post(full_path, headers, req_body.dump(), "application/json");
-                if (!res) {
-                    result.error = "Connection failed: " + httplib::to_string(res.error());
-                    return result;
-                }
-
-                auto resp = json::parse(res->body);
-                if (resp.contains("choices") && !resp["choices"].empty()) {
-                    result.content = resp["choices"][0]["message"]["content"].get<std::string>();
-                } else if (resp.contains("error")) {
-                    result.error = resp["error"]["message"].get<std::string>();
-                    return result;
-                }
-                result.model_used = resp.value("model", config_.model);
+        // Write input to temp file
+        std::string tmp_in = find_bridge() + "_input.tmp";
+        {
+            std::string content = input.dump();
+            #ifdef _WIN32
+            FILE* f = fopen(tmp_in.c_str(), "w");
+            #else
+            FILE* f = fopen(tmp_in.c_str(), "w");
+            #endif
+            if (!f) {
+                result.error = "Failed to write temp input";
+                return result;
             }
+            fwrite(content.c_str(), 1, content.size(), f);
+            fclose(f);
+        }
 
-            result.ok = true;
-            result.latency_ms = static_cast<int>(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - start).count());
+        // Call bridge
+        std::string cmd = "python \"" + find_bridge() + "\" < \"" + tmp_in + "\"";
+        #ifdef _WIN32
+        FILE* pipe = _popen(cmd.c_str(), "r");
+        #else
+        FILE* pipe = popen(cmd.c_str(), "r");
+        #endif
 
+        if (!pipe) {
+            result.error = "Failed to start Python bridge. Is python in PATH?";
+            std::remove(tmp_in.c_str());
+            return result;
+        }
+
+        char buffer[8192];
+        std::string output;
+        while (fgets(buffer, sizeof(buffer), pipe)) {
+            output += buffer;
+        }
+
+        #ifdef _WIN32
+        _pclose(pipe);
+        #else
+        pclose(pipe);
+        #endif
+
+        std::remove(tmp_in.c_str());
+
+        result.latency_ms = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count());
+
+        if (output.empty()) {
+            result.error = "Python bridge returned empty response";
+            return result;
+        }
+
+        try {
+            auto resp = json::parse(output);
+            if (resp.value("ok", false)) {
+                result.ok = true;
+                result.content = resp.value("content", "");
+                result.model_used = resp.value("model", config_.model);
+                result.tokens_used = resp.value("tokens_used", 0);
+            } else {
+                result.error = resp.value("error", "Unknown error");
+            }
         } catch (const std::exception& e) {
-            result.error = std::string("Exception: ") + e.what();
+            result.error = std::string("Failed to parse bridge response: ") + e.what()
+                         + "\nRaw: " + output.substr(0, 200);
         }
 
         return result;
     }
 
-    // Quick test: send a simple prompt to verify connectivity
     AiResult test() {
-        return analyze(
-            R"({"qps": 100, "status": "healthy"})",
-            "[]",
-            R"([{"level":"INFO","message":"All systems normal"}])"
+        return analyze_via_arg(
+            {{"qps", 100}, {"status", "healthy"}, {"error_rate_pct", 0.0}},
+            json::array(),
+            json::array()
         );
     }
 
 private:
     AiConfig config_;
 
-    void parse_url(const std::string& url, std::string& host, int& port,
-                   std::string& path, bool& use_ssl) {
-        // Parse: https://host:port/path  or  http://host:port/path
-        size_t proto_end = url.find("://");
-        std::string remainder;
-
-        if (proto_end != std::string::npos) {
-            std::string proto = url.substr(0, proto_end);
-            use_ssl = (proto == "https");
-            remainder = url.substr(proto_end + 3);
-        } else {
-            use_ssl = false;
-            remainder = url;
-        }
-
-        size_t path_start = remainder.find('/');
-        if (path_start != std::string::npos) {
-            path = remainder.substr(path_start);
-            remainder = remainder.substr(0, path_start);
-        } else {
-            path = "/";
-        }
-
-        size_t port_start = remainder.find(':');
-        if (port_start != std::string::npos) {
-            host = remainder.substr(0, port_start);
-            port = std::atoi(remainder.substr(port_start + 1).c_str());
-        } else {
-            host = remainder;
-            port = use_ssl ? 443 : 80;
-        }
-    }
-
-    std::string build_prompt(const std::string& metrics_json,
-                             const std::string& anomalies_json,
-                             const std::string& logs_json) {
-        // Pretty-print metrics if possible
-        std::string metrics_pretty = metrics_json;
-        std::string anomalies_pretty = anomalies_json;
-        try {
-            metrics_pretty = json::parse(metrics_json).dump(2);
-            auto anom = json::parse(anomalies_json);
-            // Only include last 10 anomalies to keep prompt concise
-            if (anom.is_array() && anom.size() > 10) {
-                json recent = json::array();
-                for (size_t i = anom.size() > 10 ? anom.size() - 10 : 0; i < anom.size(); ++i) {
-                    recent.push_back(anom[i]);
-                }
-                anomalies_pretty = recent.dump(2);
-            } else {
-                anomalies_pretty = anom.dump(2);
+    std::string find_bridge() {
+        // Look for ai_bridge.py in same directory as executable, then cwd
+        const char* paths[] = {"ai_bridge.py", "D:/claude/ServiceScope/ai_bridge.py", nullptr};
+        for (int i = 0; paths[i]; ++i) {
+            #ifdef _WIN32
+            FILE* f = fopen(paths[i], "r");
+            #else
+            FILE* f = fopen(paths[i], "r");
+            #endif
+            if (f) {
+                fclose(f);
+                return paths[i];
             }
-        } catch (...) {}
-
-        return R"(You are analyzing a production C++ high-concurrency service called ServiceScope.
-
-## Current Metrics
-```json
-)" + metrics_pretty + R"(
-```
-
-## Recent Anomalies
-```json
-)" + anomalies_pretty + R"(
-```
-
-## Recent Logs
-```json
-)" + logs_json + R"(
-```
-
-Please provide:
-1. **Health Assessment**: Is the service healthy/degraded/critical? (one sentence)
-2. **Key Issues**: What are the main problems right now? (bullet points)
-3. **Root Cause Analysis**: What is the most likely root cause?
-4. **Recommended Actions**: What should the operator do? (numbered list)
-5. **Confidence**: How confident are you in this analysis? (percentage)
-
-Be specific and reference actual metric values. Keep the response under 500 words.)";
+        }
+        return "ai_bridge.py"; // fallback
     }
 };
 

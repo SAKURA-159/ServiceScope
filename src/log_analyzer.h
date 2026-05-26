@@ -126,12 +126,18 @@ public:
         return anomalies;
     }
 
-    std::vector<LogEntry> recent_logs([[maybe_unused]] int seconds = 60) const {
+    std::vector<LogEntry> recent_logs(int seconds = 60) const {
+        auto cutoff = std::chrono::system_clock::now() - std::chrono::seconds(seconds);
+        auto cutoff_t = std::chrono::system_clock::to_time_t(cutoff);
+        char cutoff_str[32];
+        std::strftime(cutoff_str, sizeof(cutoff_str), "%Y-%m-%d %H:%M:%S", std::localtime(&cutoff_t));
+
         std::lock_guard<std::mutex> lock(mutex_);
-        if (logs_.empty()) return {};
         std::vector<LogEntry> result;
         for (const auto& l : logs_) {
-            result.push_back(l);
+            if (l.timestamp >= cutoff_str) {
+                result.push_back(l);
+            }
         }
         if (result.size() > 500) {
             result.erase(result.begin(), result.end() - 500);
@@ -194,18 +200,21 @@ public:
 
 private:
     void add_qps_sample(double qps) {
+        std::lock_guard<std::mutex> lock(sample_mutex_);
         qps_samples_.push_back(qps);
         if (qps_samples_.size() > kBaselineSamples) qps_samples_.pop_front();
         baseline_qps_ = std::accumulate(qps_samples_.begin(), qps_samples_.end(), 0.0) / qps_samples_.size();
     }
 
     void add_error_sample(double err_rate) {
+        std::lock_guard<std::mutex> lock(sample_mutex_);
         err_samples_.push_back(err_rate);
         if (err_samples_.size() > kBaselineSamples) err_samples_.pop_front();
         baseline_error_rate_ = std::accumulate(err_samples_.begin(), err_samples_.end(), 0.0) / err_samples_.size();
     }
 
     void add_latency_sample(double lat) {
+        std::lock_guard<std::mutex> lock(sample_mutex_);
         lat_samples_.push_back(lat);
         if (lat_samples_.size() > kBaselineSamples) lat_samples_.pop_front();
         baseline_latency_ms_ = std::accumulate(lat_samples_.begin(), lat_samples_.end(), 0.0) / lat_samples_.size();
@@ -219,10 +228,11 @@ private:
         return buf;
     }
 
-    mutable std::mutex mutex_;
+    mutable std::mutex mutex_;          // guards logs_
     std::deque<LogEntry> logs_;
     static constexpr size_t kMaxLogs = 10000;
 
+    mutable std::mutex sample_mutex_;   // guards sample deques + baselines
     std::deque<double> qps_samples_;
     std::deque<double> err_samples_;
     std::deque<double> lat_samples_;
