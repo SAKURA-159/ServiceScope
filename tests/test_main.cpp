@@ -51,6 +51,7 @@
 
 #include "metrics.h"
 #include "log_analyzer.h"
+#include "trace.h"
 
 using namespace servicescope;
 
@@ -269,6 +270,63 @@ TEST(log_ai_summary_without_anomalies) {
 }
 
 // ============================================================
+// TraceCollector Tests
+// ============================================================
+
+TEST(trace_store_and_list) {
+    TraceCollector tc;
+
+    Trace t;
+    t.trace_id = tc.next_trace_id();
+    t.endpoint = "/api/work";
+    t.http_status = 200;
+    t.total_duration_us = 50000;
+
+    Span s;
+    s.span_id = tc.next_span_id();
+    s.name = "fault_inject";
+    s.duration_us = 10;
+    s.status = "ok";
+    t.spans.push_back(s);
+
+    tc.store(t);
+    ASSERT_EQ(1U, tc.count());
+
+    auto list = tc.list_recent();
+    ASSERT_EQ(1U, list.size());
+    ASSERT_TRUE(list[0].endpoint == "/api/work");
+    ASSERT_EQ(200, list[0].http_status);
+    ASSERT_EQ(1U, list[0].spans.size());
+
+    Trace found = tc.get_by_id(t.trace_id);
+    ASSERT_TRUE(found.trace_id == t.trace_id);
+    ASSERT_TRUE(found.endpoint == "/api/work");
+
+    Trace missing = tc.get_by_id("nonexistent");
+    ASSERT_TRUE(missing.trace_id.empty());
+    return true;
+}
+
+TEST(trace_ring_buffer_max) {
+    TraceCollector tc;
+
+    for (int i = 0; i < 600; ++i) {
+        Trace t;
+        t.trace_id = tc.next_trace_id();
+        t.endpoint = "/api/test";
+        t.http_status = 200;
+        tc.store(t);
+    }
+
+    ASSERT_EQ(500U, tc.count());
+
+    auto list = tc.list_recent(600);
+    ASSERT_EQ(500U, list.size());
+
+    return true;
+}
+
+// ============================================================
 // Concurrency Stress Tests
 // ============================================================
 
@@ -347,6 +405,9 @@ int main() {
         {"log_analyze_error_spike",       test_log_analyze_detects_error_spike},
         {"log_analyze_slow_surge",        test_log_analyze_slow_request_surge},
         {"log_ai_summary",                test_log_ai_summary_without_anomalies},
+        // TraceCollector
+        {"trace_store_and_list",          test_trace_store_and_list},
+        {"trace_ring_buffer_max",         test_trace_ring_buffer_max},
         // Concurrency
         {"metrics_concurrent",            test_metrics_concurrent_recording},
         {"loganalyzer_concurrent",        test_loganalyzer_concurrent_add},

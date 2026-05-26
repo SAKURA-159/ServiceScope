@@ -46,6 +46,18 @@ canvas{width:100%!important}
 .badge-warn{background:#d2992222;color:var(--yellow)}
 .badge-bad{background:#f8514922;color:var(--red)}
 .pulse{animation:pulse 2s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.trace-row{cursor:pointer;transition:background 0.15s}.trace-row:hover{background:#1c2129}.trace-row.expanded{background:#1c2333}
+.trace-detail{display:none;padding:0}.trace-detail.open{display:table-row}.trace-detail td{padding:0!important}
+.waterfall{padding:8px 16px 12px;background:#0d1117;font-size:12px}
+.waterfall .span-row{display:flex;align-items:center;margin:4px 0;gap:8px}
+.waterfall .span-name{width:160px;flex-shrink:0;color:#c9d1d9;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.waterfall .span-bar-track{flex:1;height:18px;background:#21262d;border-radius:3px;position:relative;overflow:visible}
+.waterfall .span-bar{height:100%;border-radius:3px;min-width:2px;position:absolute;top:0}
+.waterfall .span-duration{width:70px;flex-shrink:0;color:#8b949e;font-variant-numeric:tabular-nums}
+.trace-status-ok{color:var(--green)}.trace-status-err{color:var(--red)}
+#trace-table{width:100%;font-size:13px;border-collapse:collapse}
+#trace-table th{text-align:left;padding:6px 8px;border-bottom:2px solid var(--border);color:#8b949e;font-size:11px;text-transform:uppercase}
+#trace-table td{padding:6px 8px;border-bottom:1px solid var(--border)}
 </style>
 </head>
 <body>
@@ -125,6 +137,18 @@ canvas{width:100%!important}
   <div class="card">
     <h2>Detected Anomalies</h2>
     <div id="anomalies"><p style="color:#8b949e;font-size:13px">No anomalies detected</p></div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card full-width">
+    <h2>Recent Traces <span style="font-weight:400;color:#8b949e;font-size:11px" id="trace-count"></span></h2>
+    <div style="max-height:400px;overflow-y:auto">
+      <table id="trace-table">
+        <thead><tr><th style="width:20px"></th><th>Trace ID</th><th>Endpoint</th><th>Duration</th><th>Status</th><th>Spans</th></tr></thead>
+        <tbody id="trace-tbody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -276,6 +300,8 @@ async function fetchMetrics(){
 
     // Anomalies
     fetchAnomalies();
+    // Traces
+    fetchTraces();
   }catch(e){console.error('Fetch metrics error:',e)}
 }
 
@@ -426,6 +452,72 @@ async function resetFault(){
   });
   await fetch('/api/reset',{method:'POST'});
   fetchFaultStatus();
+}
+
+async function fetchTraces(){
+  try{
+    const r = await fetch('/api/traces?limit=25');
+    const traces = await r.json();
+    document.getElementById('trace-count').textContent = ' (' + traces.length + ' traces)';
+    const tbody = document.getElementById('trace-tbody');
+    tbody.innerHTML = traces.map(t => {
+      const durMs = (t.total_duration_us / 1000).toFixed(1);
+      const shortId = t.trace_id;
+      const statusCls = t.http_status < 400 ? 'trace-status-ok' : 'trace-status-err';
+      const durColor = t.total_duration_us > 200000 ? '#f85149'
+        : t.total_duration_us > 100000 ? '#d29922' : '#c9d1d9';
+      return '<tr class="trace-row" onclick="toggleTrace(this,\'' + t.trace_id + '\')">' +
+        '<td><span id="expand-' + t.trace_id + '" style="font-size:10px">▶</span></td>' +
+        '<td style="font-family:monospace;font-size:11px">' + shortId + '</td>' +
+        '<td>' + t.endpoint + '</td>' +
+        '<td style="color:' + durColor + ';font-variant-numeric:tabular-nums">' + durMs + 'ms</td>' +
+        '<td><span class="' + statusCls + '">' + t.http_status + '</span></td>' +
+        '<td>' + t.spans.length + '</td>' +
+        '</tr>' +
+        '<tr class="trace-detail" id="detail-' + t.trace_id + '">' +
+        '<td colspan="6"><div class="waterfall" id="wf-' + t.trace_id + '"></div></td>' +
+        '</tr>';
+    }).join('');
+  }catch(e){console.error('Fetch traces error:', e)}
+}
+
+async function toggleTrace(row, traceId){
+  const detail = document.getElementById('detail-' + traceId);
+  const expand = document.getElementById('expand-' + traceId);
+  if(detail.classList.contains('open')){
+    detail.classList.remove('open');
+    row.classList.remove('expanded');
+    expand.textContent = '▶';
+    return;
+  }
+  try{
+    const r = await fetch('/api/traces/' + traceId);
+    const trace = await r.json();
+    renderWaterfall('wf-' + traceId, trace);
+    detail.classList.add('open');
+    row.classList.add('expanded');
+    expand.textContent = '▼';
+  }catch(e){console.error('Fetch trace detail error:', e)}
+}
+
+function renderWaterfall(containerId, trace){
+  const container = document.getElementById(containerId);
+  const totalUs = trace.total_duration_us || 1;
+  let html = '';
+  for(const span of trace.spans){
+    const leftPct = (span.start_offset_us / totalUs * 100).toFixed(2);
+    const widthPct = Math.max(0.5, (span.duration_us / totalUs * 100)).toFixed(2);
+    const color = span.status === 'ok' ? '#3fb950' : '#f85149';
+    const durMs = (span.duration_us / 1000).toFixed(2);
+    html += '<div class="span-row">' +
+      '<span class="span-name" title="' + span.name + '">' + span.name + '</span>' +
+      '<div class="span-bar-track">' +
+        '<div class="span-bar" style="left:' + leftPct + '%;width:' + widthPct + '%;background:' + color + '"></div>' +
+      '</div>' +
+      '<span class="span-duration">' + durMs + 'ms</span>' +
+      '</div>';
+  }
+  container.innerHTML = html;
 }
 
 setInterval(fetchMetrics, 1000);

@@ -10,6 +10,7 @@
 #include "fault_injector.h"
 #include "log_analyzer.h"
 #include "ai_client.h"
+#include "trace.h"
 
 using json = nlohmann::json;
 using namespace servicescope;
@@ -17,6 +18,7 @@ using namespace servicescope;
 // Global state
 static Metrics g_metrics;
 static LogAnalyzer g_analyzer;
+static TraceCollector g_tracer;
 static std::atomic<bool> g_running{true};
 thread_local std::mt19937 g_rng(std::random_device{}());
 
@@ -41,13 +43,36 @@ using Handler = std::function<void(const httplib::Request&, httplib::Response&)>
 
 Handler with_observability(Handler next) {
     return [next](const httplib::Request& req, httplib::Response& res) {
-        auto start = std::chrono::steady_clock::now();
+        auto trace_start = std::chrono::steady_clock::now();
+        Trace trace;
+        trace.trace_id = g_tracer.next_trace_id();
+        trace.endpoint = req.path;
+        trace.timestamp = TraceCollector::now_str();
+
         auto& fault = FaultInjector::instance();
+
+        // --- Fault inject span ---
+        auto fault_start = std::chrono::steady_clock::now();
         int fault_code = fault.check_request();
+        auto fault_end = std::chrono::steady_clock::now();
+
+        Span fault_span;
+        fault_span.span_id = g_tracer.next_span_id();
+        fault_span.name = "fault_inject";
+        fault_span.start_offset_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            fault_start - trace_start).count();
+        fault_span.duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            fault_end - fault_start).count();
+        fault_span.status = (fault_code == 0) ? "ok" : "error";
+        trace.spans.push_back(fault_span);
 
         if (fault_code == -1) {
             res.set_header("Connection", "close");
             res.status = 444;
+            trace.http_status = 444;
+            trace.total_duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - trace_start).count();
+            g_tracer.store(trace);
             return;
         }
         if (fault_code > 0) {
@@ -55,11 +80,18 @@ Handler with_observability(Handler next) {
             res.set_content(err.dump(), "application/json");
             res.status = fault_code;
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start).count();
+                std::chrono::steady_clock::now() - trace_start).count();
             g_metrics.record_request(req.path, static_cast<int>(elapsed), true);
             log_event("WARN", "Fault injected error", req.path, 0);
+            trace.http_status = fault_code;
+            trace.total_duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - trace_start).count();
+            g_tracer.store(trace);
             return;
         }
+
+        // --- Handler span ---
+        auto handler_start = std::chrono::steady_clock::now();
         try {
             next(req, res);
         } catch (const std::exception& e) {
@@ -68,9 +100,20 @@ Handler with_observability(Handler next) {
             res.set_content(err.dump(), "application/json");
             log_event("ERROR", std::string("Exception: ") + e.what(), req.path);
         }
+        auto handler_end = std::chrono::steady_clock::now();
+
+        Span handler_span;
+        handler_span.span_id = g_tracer.next_span_id();
+        handler_span.name = "handler:" + std::string(req.path);
+        handler_span.start_offset_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            handler_start - trace_start).count();
+        handler_span.duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            handler_end - handler_start).count();
+        handler_span.status = (res.status >= 400) ? "error" : "ok";
+        trace.spans.push_back(handler_span);
 
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start).count();
+            std::chrono::steady_clock::now() - trace_start).count();
         bool is_error = (res.status >= 400);
         g_metrics.record_request(req.path, static_cast<int>(elapsed), is_error);
 
@@ -80,6 +123,11 @@ Handler with_observability(Handler next) {
         } else if (elapsed > 200) {
             log_event("WARN", "Slow request", req.path, static_cast<int>(elapsed));
         }
+
+        trace.http_status = (res.status == -1) ? 200 : res.status;
+        trace.total_duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - trace_start).count();
+        g_tracer.store(trace);
     };
 }
 
@@ -376,6 +424,78 @@ int main(int argc, char* argv[]) {
             });
         }
         res.set_content(arr.dump(), "application/json");
+    });
+
+    // ---- Trace API ----
+    svr.Get("/api/traces", [](const httplib::Request& req, httplib::Response& res) {
+        int limit = 50;
+        if (req.has_param("limit")) {
+            limit = std::atoi(req.get_param_value("limit").c_str());
+            if (limit < 1) limit = 1;
+            if (limit > 500) limit = 500;
+        }
+        auto traces = g_tracer.list_recent(limit);
+        json arr = json::array();
+        for (const auto& t : traces) {
+            json spans_json = json::array();
+            for (const auto& s : t.spans) {
+                json tags = json::array();
+                for (const auto& kv : s.tags) {
+                    tags.push_back({{"key", kv.first}, {"value", kv.second}});
+                }
+                spans_json.push_back({
+                    {"span_id", s.span_id},
+                    {"name", s.name},
+                    {"start_offset_us", s.start_offset_us},
+                    {"duration_us", s.duration_us},
+                    {"status", s.status},
+                    {"tags", tags}
+                });
+            }
+            arr.push_back({
+                {"trace_id", t.trace_id},
+                {"timestamp", t.timestamp},
+                {"endpoint", t.endpoint},
+                {"http_status", t.http_status},
+                {"total_duration_us", t.total_duration_us},
+                {"spans", spans_json}
+            });
+        }
+        res.set_content(arr.dump(), "application/json");
+    });
+
+    svr.Get(R"(/api/traces/([a-zA-Z0-9_]+))", [](const httplib::Request& req, httplib::Response& res) {
+        std::string id = req.matches[1];
+        auto trace = g_tracer.get_by_id(id);
+        if (trace.trace_id.empty()) {
+            res.status = 404;
+            res.set_content(R"({"error":"trace not found"})", "application/json");
+            return;
+        }
+        json spans_json = json::array();
+        for (const auto& s : trace.spans) {
+            json tags = json::array();
+            for (const auto& kv : s.tags) {
+                tags.push_back({{"key", kv.first}, {"value", kv.second}});
+            }
+            spans_json.push_back({
+                {"span_id", s.span_id},
+                {"name", s.name},
+                {"start_offset_us", s.start_offset_us},
+                {"duration_us", s.duration_us},
+                {"status", s.status},
+                {"tags", tags}
+            });
+        }
+        json j = {
+            {"trace_id", trace.trace_id},
+            {"timestamp", trace.timestamp},
+            {"endpoint", trace.endpoint},
+            {"http_status", trace.http_status},
+            {"total_duration_us", trace.total_duration_us},
+            {"spans", spans_json}
+        };
+        res.set_content(j.dump(), "application/json");
     });
 
     // ---- AI Model Analysis ----
