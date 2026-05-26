@@ -12,6 +12,7 @@ namespace servicescope {
 
 struct Span {
     std::string span_id;
+    std::string parent_span_id; // empty for root span
     std::string name;
     uint64_t start_offset_us = 0;
     uint64_t duration_us = 0;

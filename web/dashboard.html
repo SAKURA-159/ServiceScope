@@ -129,7 +129,7 @@ canvas{width:100%!important}
     <h2>Recent Slow Requests (>200ms)</h2>
     <div style="max-height:200px;overflow-y:auto">
       <table id="slow-table">
-        <thead><tr><th>Time</th><th>Path</th><th>Latency</th></tr></thead>
+        <thead><tr><th>Time</th><th>Path</th><th>Latency</th><th>Trace</th></tr></thead>
         <tbody id="slow-tbody"></tbody>
       </table>
     </div>
@@ -295,7 +295,7 @@ async function fetchMetrics(){
     // Slow requests
     const tbody = document.getElementById('slow-tbody');
     tbody.innerHTML = m.slow_requests.map(s =>
-      '<tr><td>'+s.timestamp+'</td><td>'+s.path+'</td><td style="color:'+(s.latency_ms>500?'#f85149':'#d29922')+'">'+s.latency_ms+'ms</td></tr>'
+      '<tr><td>'+s.timestamp+'</td><td>'+s.path+'</td><td style="color:'+(s.latency_ms>500?'#f85149':'#d29922')+'">'+s.latency_ms+'ms</td><td style="font-family:monospace;font-size:10px">'+(s.trace_id||'-')+'</td></tr>'
     ).join('');
 
     // Anomalies
@@ -509,8 +509,10 @@ function renderWaterfall(containerId, trace){
     const widthPct = Math.max(0.5, (span.duration_us / totalUs * 100)).toFixed(2);
     const color = span.status === 'ok' ? '#3fb950' : '#f85149';
     const durMs = (span.duration_us / 1000).toFixed(2);
+    const indent = span.parent_span_id ? 'padding-left:24px' : '';
+    const prefix = span.parent_span_id ? '└ ' : '';
     html += '<div class="span-row">' +
-      '<span class="span-name" title="' + span.name + '">' + span.name + '</span>' +
+      '<span class="span-name" style="' + indent + '" title="' + span.name + '">' + prefix + span.name + '</span>' +
       '<div class="span-bar-track">' +
         '<div class="span-bar" style="left:' + leftPct + '%;width:' + widthPct + '%;background:' + color + '"></div>' +
       '</div>' +

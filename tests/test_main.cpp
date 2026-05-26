@@ -172,15 +172,15 @@ TEST(metrics_snapshot) {
 
 TEST(log_add_and_count) {
     LogAnalyzer la;
-    la.add_log({"2026-01-01 00:00:00", "INFO", "test", 10, "/api/test"});
-    la.add_log({"2026-01-01 00:00:01", "ERROR", "fail", 500, "/api/bad"});
+    la.add_log({"2026-01-01 00:00:00", "INFO", "test", 10, "/api/test", ""});
+    la.add_log({"2026-01-01 00:00:01", "ERROR", "fail", 500, "/api/bad", ""});
     ASSERT_EQ(2U, la.log_count());
     return true;
 }
 
 TEST(log_recent_filter_by_time) {
     LogAnalyzer la;
-    la.add_log({"2026-01-01 00:00:00", "INFO", "old", 10, "/old"});
+    la.add_log({"2026-01-01 00:00:00", "INFO", "old", 10, "/old", ""});
 
     auto recent = la.recent_logs(1);  // last 1 second — should exclude the old log
     ASSERT_EQ(0U, recent.size());
@@ -194,7 +194,7 @@ TEST(log_analyze_no_anomalies_when_normal) {
     // Simulate normal traffic: moderate QPS, low latency, no errors
     for (int i = 0; i < 50; ++i) {
         m.record_request("/api/work", 20, false);
-        la.add_log({"2026-05-26 12:00:00", "INFO", "normal", 20, "/api/work"});
+        la.add_log({"2026-05-26 12:00:00", "INFO", "normal", 20, "/api/work", ""});
     }
 
     auto snapshot = m.get_snapshot();
@@ -365,7 +365,7 @@ TEST(loganalyzer_concurrent_add) {
         threads.emplace_back([&la, t]() {
             for (int i = 0; i < kPerThread; ++i) {
                 std::string level = (i % 10 == 0) ? "ERROR" : "INFO";
-                la.add_log({"2026-05-26 12:00:00", level, "msg", (i % 100), "/api/test"});
+                la.add_log({"2026-05-26 12:00:00", level, "msg", (i % 100), "/api/test", ""});
             }
         });
     }

@@ -1,18 +1,19 @@
 # ServiceScope
 
-高并发 C++ 服务 + 实时监控面板 + 故障注入 + AI 日志分析
+高并发 C++ 服务 + 实时监控面板 + 故障注入 + 请求追踪 + AI 日志分析
 
 ## 项目简介
 
-一个完整的服务可观测性演示项目，展示从指标采集到 AI 分析的完整链路：
+一个完整的服务可观测性演示项目，覆盖可观测性三大支柱（Metrics + Logs + Traces）：
 
 ```
-指标采集 → 实时看板 → 故障注入 → 异常检测 → AI 分析
+指标采集 → 实时看板 → 故障注入 → 异常检测 → 请求追踪 → AI 分析
 ```
 
 - **C++ HTTP 服务**，基于线程池的高并发架构
 - **Web 看板**，Chart.js 实时图表（QPS、延迟、错误率、连接数）
 - **故障注入**，运行时注入延迟、错误、连接中断，无需重启
+- **请求追踪**，记录每个请求的执行阶段（fault_check → handler），瀑布图展示
 - **AI 分析**，接入大模型（DeepSeek / 通义千问 / Ollama 等），用自然语言解读系统状态
 
 ## 快速开始
@@ -58,7 +59,8 @@ build.bat
 | **QPS 趋势图** | 60 秒 QPS 折线图 |
 | **延迟直方图** | 16 个指数级桶（1ms–32s）的分布 |
 | **分位数趋势** | P50 / P90 / P99 随时间变化 |
-| **慢请求** | 超过 200ms 的请求列表 |
+| **慢请求** | 超过 200ms 的请求列表（含 trace_id） |
+| **请求追踪** | 每次请求的执行阶段耗时，瀑布图展开 |
 | **异常检测** | 自动识别的问题，带严重程度标签 |
 | **AI 分析** | 大模型生成的诊断报告 |
 
@@ -77,6 +79,8 @@ build.bat
 | `GET` | `/api/logs` | 最近日志 |
 | `GET` | `/api/logs/analysis` | 规则引擎分析报告 |
 | `GET` | `/api/logs/anomalies` | 检测到的异常列表 |
+| `GET` | `/api/traces?limit=N` | 最近 N 条请求追踪 |
+| `GET` | `/api/traces/{id}` | 单条 trace 详情（含 span 树） |
 | `POST` | `/api/reset` | 重置所有指标 |
 
 ## 故障注入
@@ -159,6 +163,57 @@ python stress_test.py --mode data --concurrency 50 --duration 20
 
 ![异常检测](docs/images/anomaly_detection.png)
 
+## 请求追踪 (Tracing)
+
+每次 HTTP 请求自动记录为一条 Trace，包含多个 Span（执行阶段）。支持在 Dashboard 上以**瀑布图**形式查看每个阶段的耗时占比和父子关系。
+
+### 数据结构
+
+```
+Trace
+├── trace_id        # 全局唯一（trace_0, trace_1, ...）
+├── endpoint        # 请求路径
+├── http_status     # HTTP 状态码
+├── total_duration  # 总耗时（微秒）
+└── spans[]
+    ├── Span: fault_inject     # root span — 故障注入检查
+    │   ├── parent_span_id: ""  (根节点)
+    │   ├── start_offset_us     相对 trace 起点的偏移
+    │   ├── duration_us         阶段耗时
+    │   └── status              ok / error
+    └── Span: handler:<path>   # child span — 业务处理
+        ├── parent_span_id: "span_0"  (指向 fault_inject)
+        ├── start_offset_us
+        ├── duration_us
+        └── status
+```
+
+### API
+
+```bash
+# 查看最近 25 条 trace
+curl localhost:8080/api/traces?limit=25
+
+# 查看单条 trace 的 span 树
+curl localhost:8080/api/traces/trace_42
+
+# 开启故障注入，观察 error span
+curl -X POST localhost:8080/api/fault/config \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true,"error_rate":0.5}'
+
+# 再次请求 trace 列表，部分 fault_inject span 状态变为 error
+curl localhost:8080/api/traces?limit=5
+```
+
+### 慢请求关联
+
+慢请求（>200ms）和日志条目都带有 `trace_id`，方便从慢查询或错误日志直接定位到对应的请求追踪。
+
+### 内存管理
+
+Traces 存储在内存环形缓冲区中，上限 500 条。超过上限自动驱逐最早的记录。
+
 ## 内建异常检测
 
 规则引擎实时监控指标和日志，检测 6 类异常：
@@ -188,6 +243,7 @@ ServiceScope/
 │   ├── metrics.h           # 原子化无锁指标采集
 │   ├── fault_injector.h    # 运行时故障注入引擎
 │   ├── log_analyzer.h      # 规则引擎异常检测 + 报告生成
+│   ├── trace.h             # 请求追踪（Span + Trace + TraceCollector）
 │   └── ai_client.h         # 大模型客户端（OpenAI / Claude / Ollama）
 ├── .gitignore
 └── README.md

@@ -19,6 +19,7 @@ struct LogEntry {
     std::string message;
     int latency_ms;
     std::string path;
+    std::string trace_id;
 };
 
 struct Anomaly {

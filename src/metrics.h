@@ -13,6 +13,7 @@ struct SlowRequest {
     std::string path;
     int latency_ms;
     std::string timestamp;
+    std::string trace_id;
 };
 
 class Metrics {
@@ -23,7 +24,8 @@ public:
         }
     }
 
-    void record_request(const std::string& path, int latency_ms, bool is_error) {
+    void record_request(const std::string& path, int latency_ms, bool is_error,
+                         const std::string& trace_id = "") {
         total_requests_.fetch_add(1);
         if (is_error) {
             total_errors_.fetch_add(1);
@@ -49,7 +51,7 @@ public:
             auto time_t = std::chrono::system_clock::to_time_t(t);
             char buf[32];
             std::strftime(buf, sizeof(buf), "%H:%M:%S", std::localtime(&time_t));
-            slow_requests_.push_back({path, latency_ms, buf});
+            slow_requests_.push_back({path, latency_ms, buf, trace_id});
             if (slow_requests_.size() > kMaxSlowRequests) {
                 slow_requests_.pop_front();
             }

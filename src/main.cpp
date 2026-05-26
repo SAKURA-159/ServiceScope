@@ -24,17 +24,19 @@ thread_local std::mt19937 g_rng(std::random_device{}());
 
 // Structured logging
 void log_event(const std::string& level, const std::string& message,
-               const std::string& path = "", int latency_ms = 0) {
+               const std::string& path = "", int latency_ms = 0,
+               const std::string& trace_id = "") {
     auto t = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(t);
     char ts[32];
     std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", std::localtime(&time_t));
 
-    g_analyzer.add_log({ts, level, message, latency_ms, path});
+    g_analyzer.add_log({ts, level, message, latency_ms, path, trace_id});
 
     std::cout << "[" << ts << "] [" << level << "] " << message;
     if (!path.empty()) std::cout << " path=" << path;
     if (latency_ms > 0) std::cout << " latency=" << latency_ms << "ms";
+    if (!trace_id.empty()) std::cout << " trace=" << trace_id;
     std::cout << std::endl;
 }
 
@@ -81,8 +83,8 @@ Handler with_observability(Handler next) {
             res.status = fault_code;
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - trace_start).count();
-            g_metrics.record_request(req.path, static_cast<int>(elapsed), true);
-            log_event("WARN", "Fault injected error", req.path, 0);
+            g_metrics.record_request(req.path, static_cast<int>(elapsed), true, trace.trace_id);
+            log_event("WARN", "Fault injected error", req.path, 0, trace.trace_id);
             trace.http_status = fault_code;
             trace.total_duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - trace_start).count();
@@ -104,6 +106,7 @@ Handler with_observability(Handler next) {
 
         Span handler_span;
         handler_span.span_id = g_tracer.next_span_id();
+        handler_span.parent_span_id = fault_span.span_id;
         handler_span.name = "handler:" + std::string(req.path);
         handler_span.start_offset_us = std::chrono::duration_cast<std::chrono::microseconds>(
             handler_start - trace_start).count();
@@ -115,13 +118,13 @@ Handler with_observability(Handler next) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - trace_start).count();
         bool is_error = (res.status >= 400);
-        g_metrics.record_request(req.path, static_cast<int>(elapsed), is_error);
+        g_metrics.record_request(req.path, static_cast<int>(elapsed), is_error, trace.trace_id);
 
         if (is_error) {
             log_event("ERROR", "Request failed with status " + std::to_string(res.status),
-                      req.path, static_cast<int>(elapsed));
+                      req.path, static_cast<int>(elapsed), trace.trace_id);
         } else if (elapsed > 200) {
-            log_event("WARN", "Slow request", req.path, static_cast<int>(elapsed));
+            log_event("WARN", "Slow request", req.path, static_cast<int>(elapsed), trace.trace_id);
         }
 
         trace.http_status = (res.status == -1) ? 200 : res.status;
@@ -181,7 +184,8 @@ json metrics_json() {
         slow.push_back({
             {"path", sr.path},
             {"latency_ms", sr.latency_ms},
-            {"timestamp", sr.timestamp}
+            {"timestamp", sr.timestamp},
+            {"trace_id", sr.trace_id}
         });
     }
     j["slow_requests"] = slow;
@@ -385,7 +389,8 @@ int main(int argc, char* argv[]) {
                 {"level", l.level},
                 {"message", l.message},
                 {"path", l.path},
-                {"latency_ms", l.latency_ms}
+                {"latency_ms", l.latency_ms},
+                {"trace_id", l.trace_id}
             });
         }
         res.set_content(arr.dump(), "application/json");
@@ -445,6 +450,7 @@ int main(int argc, char* argv[]) {
                 }
                 spans_json.push_back({
                     {"span_id", s.span_id},
+                    {"parent_span_id", s.parent_span_id},
                     {"name", s.name},
                     {"start_offset_us", s.start_offset_us},
                     {"duration_us", s.duration_us},
@@ -480,6 +486,7 @@ int main(int argc, char* argv[]) {
             }
             spans_json.push_back({
                 {"span_id", s.span_id},
+                {"parent_span_id", s.parent_span_id},
                 {"name", s.name},
                 {"start_offset_us", s.start_offset_us},
                 {"duration_us", s.duration_us},
