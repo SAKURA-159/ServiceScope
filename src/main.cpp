@@ -100,7 +100,7 @@ Handler with_observability(Handler next) {
             res.status = 500;
             json err = {{"error", e.what()}};
             res.set_content(err.dump(), "application/json");
-            log_event("ERROR", std::string("Exception: ") + e.what(), req.path);
+            log_event("ERROR", std::string("Exception: ") + e.what(), req.path, 0, trace.trace_id);
         }
         auto handler_end = std::chrono::steady_clock::now();
 
@@ -593,7 +593,8 @@ int main(int argc, char* argv[]) {
             if (log_count++ >= 50) break;
             logs_json.push_back({
                 {"timestamp", l.timestamp}, {"level", l.level},
-                {"message", l.message}, {"path", l.path}
+                {"message", l.message}, {"path", l.path},
+                {"trace_id", l.trace_id}
             });
         }
 
