@@ -1,20 +1,20 @@
 # ServiceScope
 
-高并发 C++ 服务 + 实时监控面板 + 故障注入 + 请求追踪 + AI 日志分析
+高并发 C++ 服务 + 实时监控面板 + 故障注入 + 请求追踪 + AI Agent 诊断
 
 ## 项目简介
 
 一个完整的服务可观测性演示项目，覆盖可观测性三大支柱（Metrics + Logs + Traces）：
 
 ```
-指标采集 → 实时看板 → 故障注入 → 异常检测 → 请求追踪 → AI 分析
+指标采集 → 实时看板 → 故障注入 → 异常检测 → 请求追踪 → AI Agent 诊断
 ```
 
 - **C++ HTTP 服务**，基于线程池的高并发架构
 - **Web 看板**，Chart.js 实时图表（QPS、延迟、错误率、连接数）
 - **故障注入**，运行时注入延迟、错误、连接中断，无需重启
 - **请求追踪**，记录每个请求的执行阶段（fault_check → handler），瀑布图展示
-- **AI 分析**，接入大模型（DeepSeek / 通义千问 / Ollama 等），用自然语言解读系统状态
+- **AI Agent 诊断**，接入大模型（DeepSeek / 通义千问 / Ollama 等），具备只读工具（metrics / traces）与多轮推理循环，自主追查根因
 
 ## 快速开始
 
@@ -337,17 +337,17 @@ curl -X POST localhost:8080/api/ai/config \
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `POST` | `/api/ai/analyze` | 调用 AI 分析当前指标 |
+| `POST` | `/api/ai/analyze` | 调用 AI Agent 诊断当前状态（工具调用 + 多轮推理） |
 | `GET` | `/api/ai/config` | 查看 AI 配置 |
 | `POST` | `/api/ai/config` | 运行时修改 AI 配置 |
 | `GET` | `/api/ai/test` | 测试 AI 连接 |
 
-### 工作原理
+### 工作原理（Agent 循环）
 
-1. 服务收集当前指标、最近异常、日志条目
-2. 构建包含全部上下文的结构化提示词
-3. 通过 OpenAI 兼容协议发送给大模型
-4. 返回 AI 的分析结果：健康评估、根因分析、操作建议
+1. 服务收集当前指标、最近异常、日志条目，作为「初始快照」
+2. 构建结构化提示词，并把三个只读工具（`get_metrics` / `get_traces` / `get_trace`）以 OpenAI function-calling 格式声明给大模型
+3. 进入 Agent 循环（最多 5 轮）：模型可调用工具回读服务实时数据（`/metrics`、`/api/traces`、`/api/traces/{id}`），拿到结果后继续推理，直到给出最终结论
+4. 返回 AI 的分析结果：健康评估、根因分析、操作建议、置信度，以及本次迭代轮数与工具调用次数
 
 未配置 AI 时，`/api/ai/analyze` 会优雅降级到内建规则引擎，不会报错。
 

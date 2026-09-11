@@ -1,104 +1,257 @@
 #!/usr/bin/env python3
 """
-AI Bridge — called by ServiceScope C++ server to talk to any AI API.
-Python handles HTTPS (SSL built-in), C++ handles the rest.
+AI Bridge / Agent — called by ServiceScope C++ server to talk to any OpenAI-compatible AI API.
 
-Usage:
-  echo '{"endpoint":"...","api_key":"...","model":"...","metrics":{...},"anomalies":[...],"logs":[...]}' \
-    | python ai_bridge.py
+Single-shot → Agent upgrade:
+  The bridge now runs a minimal tool-calling agent loop. The model is given three
+  read-only tools (get_metrics / get_traces / get_trace) that fetch live data from
+  the running ServiceScope HTTP server, so it can pull fresher / more detailed data
+  and iterate on its diagnosis instead of relying only on the initial snapshot.
+
+Input (stdin JSON):
+  { "endpoint", "api_key", "model", "timeout", "base_url",
+    "metrics": {...}, "anomalies": [...], "logs": [...] }
+
+Output (stdout JSON):
+  { "ok": true, "content": "...", "model": "...", "tokens_used": N,
+    "iterations": N, "tool_calls": N, "tool_trace": [...] }
 """
 
-import sys, json, os
+import sys
+import json
+import os
 from urllib import request, error as urllib_error
 
+# ---------------------------------------------------------------------------
+# Tool definitions (OpenAI function-calling schema)
+# ---------------------------------------------------------------------------
 
-def main():
-    try:
-        raw = sys.stdin.read()
-        data = json.loads(raw)
-    except Exception as e:
-        print(json.dumps({"ok": False, "error": f"Failed to read input: {e}"}))
-        sys.exit(1)
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_metrics",
+            "description": "获取 ServiceScope 当前实时指标：QPS、P50/P90/P99/P999 延迟、错误率、活跃连接数、慢请求列表。",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_traces",
+            "description": "获取最近 N 条请求追踪（trace）的摘要。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "返回条数，默认 20"}
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_trace",
+            "description": "根据 trace_id 获取单条请求追踪的详情（含 span 树、各阶段耗时）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "trace_id": {"type": "string", "description": "trace 标识"}
+                },
+                "required": ["trace_id"],
+            },
+        },
+    },
+]
 
-    endpoint = data.get("endpoint") or os.environ.get("AI_ENDPOINT", "")
-    api_key  = data.get("api_key")  or os.environ.get("AI_API_KEY", "")
-    model    = data.get("model")    or os.environ.get("AI_MODEL", "deepseek-chat")
-    timeout  = int(data.get("timeout", 30))
+SYSTEM_PROMPT = """你是一名 SRE 运维诊断 Agent，负责诊断一个高并发 C++ 服务 ServiceScope。
 
-    if not endpoint or not api_key:
-        print(json.dumps({"ok": False, "error": "AI not configured: missing endpoint or api_key"}))
-        sys.exit(1)
+你可以调用只读工具获取实时数据（工具调用不会改变服务状态）：
+- get_metrics(): 拉取最新指标
+- get_traces(limit): 拉取最近请求追踪
+- get_trace(trace_id): 拉取单条追踪详情
 
-    # Build the prompt from metrics + anomalies + logs
-    metrics_str   = json.dumps(data.get("metrics", {}), indent=2, ensure_ascii=True)
-    anomalies_str = json.dumps(data.get("anomalies", []), indent=2, ensure_ascii=True)
-    logs_str      = json.dumps(data.get("logs", []), indent=2, ensure_ascii=True)
+诊断流程建议：先看初始快照判断有无异常；若有慢请求或错误，用 get_trace 追查具体请求的 span 耗时定位瓶颈；必要时用 get_metrics 拉最新数据复核。
 
-    prompt = f"""You are analyzing a production C++ high-concurrency service called ServiceScope.
+最后输出（中文，500 字以内）：
+1. 健康评估（一句话）
+2. 关键问题（要点）
+3. 根因分析
+4. 操作建议（编号列表）
+5. 置信度（百分比）
 
-## Current Metrics
-```json
-{metrics_str}
-```
+引用真实指标数值，不要泛泛而谈。"""
 
-## Recent Anomalies
-```json
-{anomalies_str}
-```
 
-## Recent Logs
-```json
-{logs_str}
-```
+def _http_json(url, timeout=5):
+    with request.urlopen(url, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
-Please provide:
-1. **Health Assessment**: Is the service healthy/degraded/critical? (one sentence)
-2. **Key Issues**: What are the main problems right now? (bullet points)
-3. **Root Cause Analysis**: What is the most likely root cause?
-4. **Recommended Actions**: What should the operator do? (numbered list)
-5. **Confidence**: How confident are you in this analysis? (percentage)
 
-Be specific and reference actual metric values. Keep the response under 500 words.
-Respond in Chinese (中文)."""
+def call_tool(name, args, base_url):
+    """Execute a read-only tool by hitting the ServiceScope HTTP server."""
+    if name == "get_metrics":
+        return _http_json(f"{base_url}/metrics")
+    if name == "get_traces":
+        limit = int(args.get("limit", 20))
+        return _http_json(f"{base_url}/api/traces?limit={limit}")
+    if name == "get_trace":
+        tid = args["trace_id"]
+        return _http_json(f"{base_url}/api/traces/{tid}")
+    return {"error": f"unknown tool: {name}"}
 
-    req_body = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "你是一个 SRE 专家，请用中文简洁回答。"},
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": 1024,
-        "temperature": 0.3
-    }).encode("utf-8")
 
+def post_chat(endpoint, api_key, payload, timeout):
+    body = json.dumps(payload).encode("utf-8")
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+    req = request.Request(endpoint, data=body, headers=headers, method="POST")
+    with request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
-    try:
-        req = request.Request(endpoint, data=req_body, headers=headers, method="POST")
-        with request.urlopen(req, timeout=timeout) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
 
-        if "choices" in result and len(result["choices"]) > 0:
-            content = result["choices"][0]["message"]["content"]
-            print(json.dumps({
+def single_shot(endpoint, api_key, model, messages, timeout):
+    """Fallback: one call, no tools (for providers that reject `tools`)."""
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": 1024,
+        "temperature": 0.3,
+    }
+    result = post_chat(endpoint, api_key, payload, timeout)
+    msg = result["choices"][0]["message"]
+    return {
+        "ok": True,
+        "model": result.get("model", model),
+        "content": msg.get("content", ""),
+        "tokens_used": result.get("usage", {}).get("total_tokens", 0),
+        "iterations": 1,
+        "tool_calls": 0,
+        "tool_trace": [],
+    }
+
+
+def run_agent(data):
+    endpoint = data.get("endpoint") or os.environ.get("AI_ENDPOINT", "")
+    api_key = data.get("api_key") or os.environ.get("AI_API_KEY", "")
+    model = data.get("model") or os.environ.get("AI_MODEL", "deepseek-chat")
+    timeout = int(data.get("timeout", 30))
+    base_url = data.get("base_url") or os.environ.get("AI_BASE_URL", "http://localhost:8080")
+    max_iterations = int(data.get("max_iterations", 5))
+
+    if not endpoint or not api_key:
+        return {"ok": False, "error": "AI not configured: missing endpoint or api_key"}
+
+    metrics_str = json.dumps(data.get("metrics", {}), indent=2, ensure_ascii=True)
+    anomalies_str = json.dumps(data.get("anomalies", []), indent=2, ensure_ascii=True)
+    logs_str = json.dumps(data.get("logs", []), indent=2, ensure_ascii=True)
+
+    user_prompt = f"""## 初始快照（请求分析时刻）
+
+### 当前指标
+```json
+{metrics_str}
+```
+
+### 近期异常
+```json
+{anomalies_str}
+```
+
+### 近期日志
+```json
+{logs_str}
+```
+
+请开始诊断，必要时调用工具获取更详细或更新的数据。"""
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    tool_trace = []
+    total_tokens = 0
+
+    for iteration in range(1, max_iterations + 1):
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": 1024,
+            "temperature": 0.3,
+            "tools": TOOLS,
+            "tool_choice": "auto",
+        }
+        try:
+            result = post_chat(endpoint, api_key, payload, timeout)
+        except urllib_error.HTTPError as e:
+            # A provider that doesn't understand `tools` typically 400s on the
+            # first call — degrade to a single-shot request without tools.
+            if iteration == 1 and e.code in (400, 404, 422):
+                try:
+                    return single_shot(endpoint, api_key, model, messages, timeout)
+                except Exception as se:
+                    return {"ok": False, "error": str(se)}
+            return {"ok": False, "error": f"HTTP {e.code}: {e.reason}"}
+        except urllib_error.URLError as e:
+            return {"ok": False, "error": f"Connection failed: {e.reason}"}
+
+        total_tokens += result.get("usage", {}).get("total_tokens", 0)
+
+        if "choices" not in result or not result["choices"]:
+            return {"ok": False, "error": "Unexpected API response format"}
+
+        msg = result["choices"][0]["message"]
+        messages.append(msg)
+
+        tool_calls = msg.get("tool_calls")
+        if not tool_calls:
+            # No tool calls → final answer.
+            return {
                 "ok": True,
                 "model": result.get("model", model),
+                "content": msg.get("content", ""),
+                "tokens_used": total_tokens,
+                "iterations": iteration,
+                "tool_calls": len(tool_trace),
+                "tool_trace": tool_trace,
+            }
+
+        # Execute each requested tool and append results for the next turn.
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            name = fn.get("name", "")
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            try:
+                result_obj = call_tool(name, args, base_url)
+                content = json.dumps(result_obj, ensure_ascii=False)
+            except Exception as e:
+                content = json.dumps({"error": str(e)}, ensure_ascii=False)
+            tool_trace.append({"call": name, "args": args})
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id", ""),
                 "content": content,
-                "tokens_used": result.get("usage", {}).get("total_tokens", 0)
-            }, ensure_ascii=True))
-        elif "error" in result:
-            print(json.dumps({"ok": False, "error": result["error"].get("message", str(result["error"]))}))
-        else:
-            print(json.dumps({"ok": False, "error": "Unexpected API response format"}))
-    except urllib_error.HTTPError as e:
-        print(json.dumps({"ok": False, "error": f"HTTP {e.code}: {e.reason}"}))
-    except urllib_error.URLError as e:
-        print(json.dumps({"ok": False, "error": f"Connection failed: {e.reason}"}))
+            })
+
+    return {"ok": False, "error": f"Exceeded max iterations ({max_iterations}) without final answer"}
+
+
+def main():
+    try:
+        data = json.loads(sys.stdin.read())
     except Exception as e:
-        print(json.dumps({"ok": False, "error": str(e)}))
+        print(json.dumps({"ok": False, "error": f"Failed to read input: {e}"}))
+        sys.exit(1)
+
+    out = run_agent(data)
+    print(json.dumps(out, ensure_ascii=False))
 
 
 if __name__ == "__main__":

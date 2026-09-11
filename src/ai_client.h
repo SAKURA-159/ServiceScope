@@ -23,6 +23,8 @@ struct AiResult {
     std::string model_used;
     int latency_ms = 0;
     int tokens_used = 0;
+    int iterations = 0;
+    int tool_calls = 0;
     bool ok = false;
     std::string error;
 };
@@ -125,7 +127,8 @@ public:
     }
 
     // Simplified: pass input as command argument (avoids popen write-only issue)
-    AiResult analyze_via_arg(const json& metrics, const json& anomalies, const json& logs) {
+    AiResult analyze_via_arg(const json& metrics, const json& anomalies, const json& logs,
+                             const std::string& base_url = "http://localhost:8080") {
         AiResult result;
         if (!config_.enabled) {
             result.error = "AI not configured";
@@ -139,6 +142,7 @@ public:
         input["api_key"] = config_.api_key;
         input["model"] = config_.model;
         input["timeout"] = config_.timeout_secs;
+        input["base_url"] = base_url;
         input["metrics"] = metrics;
         input["anomalies"] = anomalies;
         input["logs"] = logs;
@@ -204,6 +208,8 @@ public:
                 result.content = resp.value("content", "");
                 result.model_used = resp.value("model", config_.model);
                 result.tokens_used = resp.value("tokens_used", 0);
+                result.iterations = resp.value("iterations", 0);
+                result.tool_calls = resp.value("tool_calls", 0);
             } else {
                 result.error = resp.value("error", "Unknown error");
             }

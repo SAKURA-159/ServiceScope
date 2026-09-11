@@ -20,6 +20,7 @@ static Metrics g_metrics;
 static LogAnalyzer g_analyzer;
 static TraceCollector g_tracer;
 static std::atomic<bool> g_running{true};
+static std::string g_base_url = "http://localhost:8080";
 thread_local std::mt19937 g_rng(std::random_device{}());
 
 // Structured logging
@@ -203,6 +204,7 @@ int main(int argc, char* argv[]) {
 
     if (argc > 1) port = std::atoi(argv[1]);
     if (argc > 2) threads = std::atoi(argv[2]);
+    g_base_url = "http://localhost:" + std::to_string(port);
 
     std::cout << R"(
   ServiceScope v1.0.0
@@ -598,13 +600,15 @@ int main(int argc, char* argv[]) {
             });
         }
 
-        auto result = ai.analyze_via_arg(m_json, anomalies_json, logs_json);
+        auto result = ai.analyze_via_arg(m_json, anomalies_json, logs_json, g_base_url);
 
         json response = {
             {"source", "ai"},
             {"model", result.model_used},
             {"latency_ms", result.latency_ms},
-            {"ok", result.ok}
+            {"ok", result.ok},
+            {"iterations", result.iterations},
+            {"tool_calls", result.tool_calls}
         };
 
         if (result.ok) {
