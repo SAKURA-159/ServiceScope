@@ -22,6 +22,22 @@ import json
 import os
 from urllib import request, error as urllib_error
 
+# Build an opener that routes localhost/127.0.0.1 directly (bypassing the
+# system proxy). Tool calls hit the local ServiceScope server, and a local
+# mock LLM in tests is also local — without this, a configured http_proxy
+# turns localhost requests into HTTP 502. Setting the env var (not just the
+# proxies dict) is required because urllib's proxy_bypass() re-reads no_proxy
+# from the environment.
+def _make_opener():
+    no = os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or ""
+    no_proxy = ",".join(x for x in (no, "localhost", "127.0.0.1") if x)
+    os.environ["no_proxy"] = no_proxy
+    os.environ["NO_PROXY"] = no_proxy
+    return request.build_opener(request.ProxyHandler())
+
+
+_OPENER = _make_opener()
+
 # ---------------------------------------------------------------------------
 # Tool definitions (OpenAI function-calling schema)
 # ---------------------------------------------------------------------------
@@ -85,7 +101,7 @@ SYSTEM_PROMPT = """你是一名 SRE 运维诊断 Agent，负责诊断一个高�
 
 
 def _http_json(url, timeout=5):
-    with request.urlopen(url, timeout=timeout) as resp:
+    with _OPENER.open(url, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -109,7 +125,7 @@ def post_chat(endpoint, api_key, payload, timeout):
         "Content-Type": "application/json",
     }
     req = request.Request(endpoint, data=body, headers=headers, method="POST")
-    with request.urlopen(req, timeout=timeout) as resp:
+    with _OPENER.open(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -244,6 +260,13 @@ def run_agent(data):
 
 
 def main():
+    # Force UTF-8 I/O — Windows Python defaults to the GBK locale, which would
+    # corrupt Chinese metrics/logs on the way in and Chinese content on the way
+    # out (the C++ side parses the result as UTF-8 JSON).
+    for stream in (sys.stdin, sys.stdout):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
     try:
         data = json.loads(sys.stdin.read())
     except Exception as e:
@@ -251,7 +274,7 @@ def main():
         sys.exit(1)
 
     out = run_agent(data)
-    print(json.dumps(out, ensure_ascii=False))
+    print(json.dumps(out, ensure_ascii=True))
 
 
 if __name__ == "__main__":

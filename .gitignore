@@ -25,3 +25,7 @@ CMakeCache.txt
 cmake_install.cmake
 Makefile
 _deps/
+
+# Python
+__pycache__/
+*.pyc
